@@ -1,0 +1,5 @@
+https://pylablib.readthedocs.io/en/latest/.apidoc/pylablib.devices.M2.html#pylablib.devices.M2.solstis.Solstis
+Read this. Learn this. Undertsand this.
+
+from epics import PV
+>>> PV("LaserLab:wavenumber_1")
