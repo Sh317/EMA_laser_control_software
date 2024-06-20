@@ -3,8 +3,9 @@ import numpy as np
 from epics import PV
 from .base import ControlLoop
 
+
 class LaserControl(ControlLoop):
-    def __init__(self, ip_address, port, wavenumber_pv):
+    def __init__(self, ip_address, port, wavenumber_pv, gui_callback=None):
         self.laser = M2.Solstis(ip_address, port)
         self.wavenumber = PV(wavenumber_pv)
         self.state = 0
@@ -13,27 +14,39 @@ class LaserControl(ControlLoop):
         self.yDat = np.array([])
         self.p = 4.5
         self.target = 0.0
+        self.gui_callback = gui_callback
 
     def update(self):
         self.wnum = round(float(self.wavenumber.get()), 5)
         etalon_lock_status = self.laser.get_etalon_lock_status()
         reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
 
-        if etalon_lock_status == 'off' or reference_cavity_lock_status == 'off':
+        if etalon_lock_status == "off" or reference_cavity_lock_status == "off":
             self.unlock()
 
         if self.state == 1:
             if len(self.xDat) == 60:
                 self.xDat = np.delete(self.xDat, 0)
                 self.yDat = np.delete(self.yDat, 0)
-            self.xDat = np.append(self.xDat, self.xDat[-1] + 100)
+            if len(self.xDat) == 0:
+                self.xDat = np.array([0])
+            else:
+                self.xDat = np.append(self.xDat, self.xDat[-1] + 100)
             self.yDat = np.append(self.yDat, self.wnum)
+
+            # Simple proportional control
             delta = self.target - self.wnum
             u = self.p * delta
-            cavity = self.laser.get_full_status(include=['web_status'])['web_status']['cavity_tune']
+            cavity = self.laser.get_full_status(include=["web_status"])["web_status"][
+                "cavity_tune"
+            ]
             self.laser.tune_reference_cavity(float(cavity) - u)
 
+            if self.gui_callback:
+                self.gui_callback(self.wnum, self.xDat, self.yDat)
+
         if self.scan == 1:
+            delta = self.target - self.wnum
             if abs(delta) <= 0.00005 and not self.do_time:
                 self.do_time = 1
             if self.do_time:
@@ -47,7 +60,6 @@ class LaserControl(ControlLoop):
                 except IndexError:
                     self.scan = 0
                     self.state = 0
-                    self.lb.toggle()
 
     def lock(self):
         self.state = 1
@@ -72,7 +84,6 @@ class LaserControl(ControlLoop):
         self.j = 0
 
     def stop(self):
-        # TODO
         pass
 
     def p_update(self, value):

@@ -5,13 +5,15 @@ import pyqtgraph as pg
 from .base import GUI
 import numpy as np
 import os
+
 path2file = os.path.join(os.path.dirname(__file__))
 
 
-class LaserGUI(QWidget):
+class LaserGUI(QWidget, GUI):
     def __init__(self, control_loop, parent=None):
-        super(LaserGUI, self).__init__()
+        super(LaserGUI, self).__init__(parent)
         self.control_loop = control_loop
+        self.control_loop.gui_callback = self.update_display
         self.setup_ui()
         self.timer = QTimer()
         self.timer.setInterval(100)
@@ -108,14 +110,15 @@ class LaserGUI(QWidget):
         self.etalock = QLabel()
         self.etalock.setText("Etalon Lock:")
         self.etalocklock = QLabel()
-        self.etalocklock.setPixmap(QPixmap(
-            os.path.join(path2file, "locked.jpg")).scaledToWidth(32))
+        self.cavlocklock.setPixmap(
+            QPixmap(os.path.join(path2file, "locked.jpg")).scaledToWidth(32)
+        )
         self.cavlock = QLabel()
         self.cavlock.setText("Cavity Lock:")
         self.cavlocklock = QLabel()
-        self.cavlocklock.setPixmap(QPixmap(
-            os.path.join(path2file, "locked.jpg")).scaledToWidth(32))
-
+        self.cavlocklock.setPixmap(
+            QPixmap(os.path.join(path2file, "locked.jpg")).scaledToWidth(32)
+        )
         self.plotWidget = pg.PlotWidget()
 
         self.cwl = QLabel()
@@ -155,3 +158,7 @@ class LaserGUI(QWidget):
     def closeEvent(self, event):
         self.control_loop.stop()
         event.accept()
+
+    def update_display(self, wnum, x_data, y_data):
+        self.cwl.setText(str(wnum))
+        self.plotWidget.plot(x_data, y_data, clear=True)
