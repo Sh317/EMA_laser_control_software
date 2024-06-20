@@ -160,6 +160,6 @@ class LaserGUI(QWidget):
         event.accept()
 
     def update_display(self, wnum, x_data, y_data):
-        print(f"Update display called with wnum: {wnum}")
+        print(f"Update display called with wnum: {wnum}")  # Debug print
         self.cwl.setText(str(wnum))
         self.plotWidget.plot(x_data, y_data, clear=True)
