@@ -110,7 +110,7 @@ class LaserGUI(QWidget):
         self.etalock = QLabel()
         self.etalock.setText("Etalon Lock:")
         self.etalocklock = QLabel()
-        self.cavlocklock.setPixmap(
+        self.etalocklock.setPixmap(
             QPixmap(os.path.join(path2file, "locked.jpg")).scaledToWidth(32)
         )
         self.cavlock = QLabel()
