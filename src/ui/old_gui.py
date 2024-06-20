@@ -9,9 +9,9 @@ import os
 path2file = os.path.join(os.path.dirname(__file__))
 
 
-class LaserGUI(QWidget, GUI):
+class LaserGUI(QWidget):
     def __init__(self, control_loop, parent=None):
-        super(LaserGUI, self).__init__(parent)
+        super(LaserGUI, self).__init__()
         self.control_loop = control_loop
         self.control_loop.gui_callback = self.update_display
         self.setup_ui()
