@@ -5,9 +5,9 @@ import pyqtgraph as pg
 from .base import GUI
 import numpy as np
 
-class LaserGUI(QWidget, GUI):
+class LaserGUI(QWidget):
     def __init__(self, control_loop, parent=None):
-        super(LaserGUI, self).__init__(parent)
+        super(self).__init__(parent)
         self.control_loop = control_loop
         self.setup_ui()
         self.timer = QTimer()

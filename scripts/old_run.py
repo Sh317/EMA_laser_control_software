@@ -1,7 +1,8 @@
 import sys
 from PyQt5.QtWidgets import QApplication
-from src.control.old_laser_control import LaserControl
-from src.ui.old_gui import LaserGUI
+sys.path.append('.\\src')
+from control.old_laser_control import LaserControl
+from ui.old_gui import LaserGUI
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
