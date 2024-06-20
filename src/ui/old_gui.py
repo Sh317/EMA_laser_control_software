@@ -4,10 +4,13 @@ from PyQt5.QtWidgets import *
 import pyqtgraph as pg
 from .base import GUI
 import numpy as np
+import os
+path2file = os.path.join(os.path.dirname(__file__))
+
 
 class LaserGUI(QWidget):
     def __init__(self, control_loop, parent=None):
-        super(self).__init__(parent)
+        super(LaserGUI, self).__init__()
         self.control_loop = control_loop
         self.setup_ui()
         self.timer = QTimer()
@@ -105,11 +108,13 @@ class LaserGUI(QWidget):
         self.etalock = QLabel()
         self.etalock.setText("Etalon Lock:")
         self.etalocklock = QLabel()
-        self.etalocklock.setPixmap(QPixmap("locked.jpg").scaledToWidth(32))
+        self.etalocklock.setPixmap(QPixmap(
+            os.path.join(path2file, "locked.jpg")).scaledToWidth(32))
         self.cavlock = QLabel()
         self.cavlock.setText("Cavity Lock:")
         self.cavlocklock = QLabel()
-        self.cavlocklock.setPixmap(QPixmap("locked.jpg").scaledToWidth(32))
+        self.cavlocklock.setPixmap(QPixmap(
+            os.path.join(path2file, "locked.jpg")).scaledToWidth(32))
 
         self.plotWidget = pg.PlotWidget()
 

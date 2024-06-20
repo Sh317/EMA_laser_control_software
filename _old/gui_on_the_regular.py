@@ -14,7 +14,7 @@ if platform.system()=='Windows' and int(platform.release()) >= 8:  #prevents axi
     ctypes.windll.shcore.SetProcessDpiAwareness(True) #https://stackoverflow.com/questions/69140610/pyqtgraph-when-show-in-a-different-screen-misalign-axis
 
 laser = M2.Solstis("192.168.1.222", 39933)
-wavenumber = PV("LaserLab:wavenumber_1")
+wavenumber = PV("LaserLab:wavenumber_3")
 
 class Form(QWidget):
     def __init__(self, parent=None):
