@@ -13,6 +13,7 @@ class LaserControl(ControlLoop):
         self.xDat = np.array([])
         self.yDat = np.array([])
         self.p = 4.5
+        #self.t_wnum = 0
         self.target = 0.0
         self.gui_callback = gui_callback
 
@@ -63,7 +64,7 @@ class LaserControl(ControlLoop):
 
     def lock(self):
         self.state = 1
-        self.target = self.wl.value()
+        self.target = self.t_wnum()
         self.xDat = np.array([])
         self.yDat = np.array([])
 
@@ -86,8 +87,15 @@ class LaserControl(ControlLoop):
     def stop(self):
         pass
 
-    def p_update(self, value):
+    def t_wnum_update(self, value):
+        try:
+            self.t_wnum = float(value)
+        except ValueError:
+            self.twnum = 0
+
+    def p__update(self, value):
         try:
             self.p = float(value)
         except ValueError:
             self.p = 0
+
