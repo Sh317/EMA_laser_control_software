@@ -8,6 +8,7 @@ class LaserControl(ControlLoop):
     def __init__(self, ip_address, port, wavenumber_pv, gui_callback=None):
         self.laser = M2.Solstis(ip_address, port)
         self.wavenumber = PV(wavenumber_pv)
+        self.wnum = round(float(self.wavenumber.get()), 5)
         self.state = 0
         self.scan = 0
         self.xDat = np.array([])
@@ -62,9 +63,9 @@ class LaserControl(ControlLoop):
                     self.scan = 0
                     self.state = 0
 
-    def lock(self):
+    def lock(self, value):
         self.state = 1
-        self.target = self.t_wnum()
+        self.target = value
         self.xDat = np.array([])
         self.yDat = np.array([])
 
@@ -87,11 +88,11 @@ class LaserControl(ControlLoop):
     def stop(self):
         pass
 
-    def t_wnum_update(self, value):
-        try:
-            self.t_wnum = float(value)
-        except ValueError:
-            self.twnum = 0
+    #def t_wnum_update(self, value):
+    #    try:
+    #        self.t_wnum = float(value)
+    #    except ValueError:
+    #        self.twnum = 0
 
     def p__update(self, value):
         try:
