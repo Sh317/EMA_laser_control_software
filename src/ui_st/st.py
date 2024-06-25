@@ -1,6 +1,7 @@
 import streamlit as st
 import sys
 import time
+import numpy as np
 
 sys.path.append('.\\src')
 from control.st_laser_control import LaserControl
@@ -26,7 +27,7 @@ control_loop = LaserControl("192.168.1.222", 39933, f"LaserLab:{tag}")
 control_loop.update()
 
 #locks
-col1, col2 = st.columns(2)
+col1, col2 = st.columns(2, vertical_alignment="top")
 
 etalon_on = col1.empty()
 cavity_on = col2.empty()    
@@ -66,15 +67,13 @@ def cavity_lock_status():
     if control_loop.reference_cavity_lock_status == "off":
         return False
     
-etalon_on.toggle("Etalon Lock", value=)
+etalon_on.toggle("Etalon Lock", value=etalon_lock_status())
 if etalon_on:
     control_loop.lock(t_wnum)
-    st.markdown(":locked:")
 
-cavity_on.toggle("Cavity Lock")
+cavity_on.toggle("Cavity Lock", value=cavity_lock_status())
 if cavity_on:
     control_loop.lock(t_wnum)
-    st.markdown(":locked:")
 
 #scan setttings
 c1, c2, c3, c4 = st.columns(4, vertical_alignment='bottom')
@@ -106,12 +105,16 @@ scan_button.button("Start Scan", on_click=start_scan)
 
 #Plotting
 st.markdown("Plot")
-#st.line_chart(
+plot = st.empty()
+
+
+
 # placeholder for updating live parameters
 placeholder = st.empty()
 
 while True:
-    c_wnum.metric(label = "Current Wavenumber (cm^-1)", value=round(float(control_loop.wavenumber.get()), 5))
+    control_loop.update()
+    c_wnum.metric(label="Current Wavenumber (cm^-1)", value=round(float(control_loop.wavenumber.get()), 5))
     #print(round(float(control_loop.wavenumber.get()), 5))
-    print()
+    plot.line_chart(control_loop.dataToPlot, x_label="Indices", y_label="Wavenumber (cm^-1)", width=800, height=400)
     time.sleep(1)

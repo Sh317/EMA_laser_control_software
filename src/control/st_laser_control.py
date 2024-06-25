@@ -13,6 +13,7 @@ class LaserControl(ControlLoop):
         self.scan = 0
         self.xDat = np.array([])
         self.yDat = np.array([])
+        self.dataToPlot = np.array([self.xDat, self.yDat])
         self.p = 4.5
         #self.t_wnum = 0
         self.target = 0.0
@@ -46,6 +47,7 @@ class LaserControl(ControlLoop):
 
             if self.gui_callback:
                 self.gui_callback(self.wnum, self.xDat, self.yDat)
+            #what is this for?
 
         if self.scan == 1:
             delta = self.target - self.wnum
