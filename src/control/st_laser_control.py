@@ -17,15 +17,15 @@ class LaserControl(ControlLoop):
         self.p = 4.5
         #self.t_wnum = 0
         self.target = 0.0
-        self.gui_callback = gui_callback
+        self.gui_callback = gui_callback      
 
     def update(self):
         self.wnum = round(float(self.wavenumber.get()), 5)
         self.etalon_lock_status = self.laser.get_etalon_lock_status()
         self.reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
 
-        if self.etalon_lock_status == "off" or self.reference_cavity_lock_status == "off":
-            self.unlock()
+#        if self.etalon_lock_status == "off" or self.reference_cavity_lock_status == "off":
+#            self.unlock()
 
         if self.state == 1:
             if len(self.xDat) == 60:
