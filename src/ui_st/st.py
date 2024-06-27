@@ -2,6 +2,7 @@ import streamlit as st
 import sys
 import time
 import numpy as np
+import asyncio
 
 sys.path.append('.\\src')
 from control.st_laser_control import LaserControl
@@ -20,21 +21,31 @@ st.title("Laser Control System")
 sidebar = st.sidebar
 
 # select which laser to control
-i = sidebar.selectbox("Select Laser", ["Laser 1", "Laser 2", "Laser 3", "Laser 4"], index=2)
+i = sidebar.selectbox("Select Laser", ["Laser 1", "Laser 2", "Laser 3", "Laser 4"], index=0)
 tag = f"wavenumber_{i.split(" ")[1]}"
 control_loop = LaserControl("192.168.1.222", 39933, f"LaserLab:{tag}")
 
 
-try:
 
-    1/0
-    control_loop.update()
+def main(): 
+    #1/0
+    try:
+        control_loop.update()
+    except Exception as e:
+        st.error("Umm...Something went wrong...", icon="🚨")
+        e1, e2 = st.columns(2)
+        with e1.popover(label="View Error Details"):
+            st.write(f"Error: {str(e)}")
+        rerun = e2.button("Try Again!", type="primary")
+        if rerun:
+            st.rerun()
 
     #locks
-    col1, col2 = st.columns(2, vertical_alignment="top")
+    col1, col2, col3 = st.columns(3, vertical_alignment="top")
 
-    etalon_on = col1.empty()
-    cavity_on = col2.empty()    
+    etalon_status = col1.empty()
+    cavity_status = col2.empty()
+    lock_toggle = col3.empty()    
 
     # current wavenumber, target wavenumber, and proportional gain
     #def t_wnum_update():
@@ -60,52 +71,54 @@ try:
 
     #etalon and cavity locks callback
     def etalon_lock_status():
-        if control_loop.etalon_lock_status == "on":
-            return True
-        if control_loop.etalon_lock_status == "off":
-            return False
+        status = asyncio.run(control_loop.etalon_lock_status())
+        assert isinstance(status, str) and status in ["on", "off"], f"Invalid etalon lock status: {status}"
+        return "🔒" if  status == "on" else "🔓"
 
     def cavity_lock_status():
         if control_loop.reference_cavity_lock_status == "on":
-            return True
+            return "🔒"
         if control_loop.reference_cavity_lock_status == "off":
-            return False
+            return "🔓"
         
-    etalon_on.toggle("Etalon Lock", value=etalon_lock_status())
-    if etalon_on:
-        control_loop.lock(t_wnum)
+    etalon_status.metric("Etalon", value=etalon_lock_status())
+    cavity_status.metric("Cavity", value=cavity_lock_status())
 
-    cavity_on.toggle("Cavity Lock", value=cavity_lock_status())
-    if cavity_on:
-        control_loop.lock(t_wnum)
+    lock_toggle.toggle("Lock")
+    if lock_toggle:
+        if control_loop.reference_cavity_lock_status == "on" and asyncio.run(control_loop.etalon_lock_status()) == "on":
+            control_loop.lock(t_wnum)
+        else:
+            control_loop.unlock()
+            st.toast("Something is not locked!")
 
     #scan setttings
-    c1, c2, c3, c4 = st.columns(4, vertical_alignment='bottom')
-    c1.header("Scan Settings", divider="gray")
-    c2.write("")
-    c3.write("")
-    scan_button = c4.empty()
-    start_wnum = c1.number_input("Start Wavenumber (cm^-1)", 
-                                value=round(float(control_loop.wavenumber.get()), 5),
-                                step=0.00001, 
-                                format="%0.5f"
-                                )
-    end_wnum = c2.number_input("End Wavenumber (cm^-1)", 
-                                value=round(float(control_loop.wavenumber.get()), 5),
-                                step=0.00001, 
-                                format="%0.5f"
-                                )
-    no_of_steps = c3.number_input("No. of Steps", 
-                                value=5,
-                                max_value=50
-                                )
-    time_per_scan = c4.number_input("Time per scan (sec)", 
-                                    value=2.0,
-                                    step=0.1
+    with sidebar.expander("Scan Settings"):
+        c1, c2 = st.columns(2, vertical_alignment='bottom')
+        scan_button = c1.empty()
+        c2.write("")
+        start_wnum = c1.number_input("Start Wavenumber (cm^-1)", 
+                                    value=round(float(control_loop.wavenumber.get()), 5),
+                                    step=0.00001, 
+                                    format="%0.5f"
                                     )
-    def start_scan():
-        control_loop.start_scan(start_wnum, end_wnum, no_of_steps, time_per_scan)
-    scan_button.button("Start Scan", on_click=start_scan)
+        end_wnum = c2.number_input("End Wavenumber (cm^-1)", 
+                                    value=round(float(control_loop.wavenumber.get()), 5),
+                                    step=0.00001, 
+                                    format="%0.5f"
+                                    )
+        no_of_steps = c1.number_input("No. of Steps", 
+                                    value=5,
+                                    max_value=50
+                                    )
+        time_per_scan = c2.number_input("Time per scan (sec)", 
+                                        value=2.0,
+                                        step=0.1
+                                        )
+        def start_scan():
+            control_loop.start_scan(start_wnum, end_wnum, no_of_steps, time_per_scan)
+            st.toast("Scan started!")
+        scan_button.button("Start Scan", on_click=start_scan)
 
     #Plotting
     st.markdown("Plot")
@@ -120,14 +133,9 @@ try:
         control_loop.update()
         c_wnum.metric(label="Current Wavenumber (cm^-1)", value=round(float(control_loop.wavenumber.get()), 5))
         #print(round(float(control_loop.wavenumber.get()), 5))
+        print(control_loop.dataToPlot)
         plot.line_chart(control_loop.dataToPlot, x_label="Indices", y_label="Wavenumber (cm^-1)", width=800, height=400)
-        time.sleep(1)
+        time.sleep(0.1)
 
-except Exception as e:
-    st.error("Umm...Something went wrong...", icon="🚨")
-    e1, e2 = st.columns(2)
-    with e1.popover(label="View Error Details"):
-        st.write(f"Error: {str(e)}")
-    rerun = e2.button("Try Again!", type="primary")
-    if rerun:
-        st.rerun()
+if __name__ == "__main__":
+    main()

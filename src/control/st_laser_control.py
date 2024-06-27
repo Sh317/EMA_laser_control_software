@@ -2,6 +2,7 @@ from pylablib.devices import M2
 import numpy as np
 from epics import PV
 from .base import ControlLoop
+import asyncio
 
 
 class LaserControl(ControlLoop):
@@ -13,29 +14,35 @@ class LaserControl(ControlLoop):
         self.scan = 0
         self.xDat = np.array([])
         self.yDat = np.array([])
-        self.dataToPlot = np.array([self.xDat, self.yDat])
         self.p = 4.5
         #self.t_wnum = 0
         self.target = 0.0
         self.gui_callback = gui_callback      
-
-    def update(self):
-        self.wnum = round(float(self.wavenumber.get()), 5)
+    async def etalon_lock_status(self):
         self.etalon_lock_status = self.laser.get_etalon_lock_status()
+        return self.etalon_lock_status
+    
+    def _update(self):
+        self.wnum = round(float(self.wavenumber.get()), 5)
+
+#        async def reference_cavity_lock_status(self):
+#            self.laser.get_reference_cavity_lock_status()
         self.reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
 
 #        if self.etalon_lock_status == "off" or self.reference_cavity_lock_status == "off":
 #            self.unlock()
 
+        if len(self.xDat) == 60:
+            self.xDat = np.delete(self.xDat, 0)
+            self.yDat = np.delete(self.yDat, 0)
+        if len(self.xDat) == 0:
+            self.xDat = np.array([0])
+        else:
+            self.xDat = np.append(self.xDat, self.xDat[-1] + 100)
+        self.yDat = np.append(self.yDat, self.wnum)
+        self.dataToPlot = np.array([self.xDat, self.yDat])
+
         if self.state == 1:
-            if len(self.xDat) == 60:
-                self.xDat = np.delete(self.xDat, 0)
-                self.yDat = np.delete(self.yDat, 0)
-            if len(self.xDat) == 0:
-                self.xDat = np.array([0])
-            else:
-                self.xDat = np.append(self.xDat, self.xDat[-1] + 100)
-            self.yDat = np.append(self.yDat, self.wnum)
 
             # Simple proportional control
             delta = self.target - self.wnum
@@ -64,6 +71,13 @@ class LaserControl(ControlLoop):
                 except IndexError:
                     self.scan = 0
                     self.state = 0
+    
+    def update(self):
+        try:
+            self._update()
+        except Exception as e:
+            print(f"Error in LaserControl._update: {e}")
+            pass
 
     def lock(self, value):
         self.state = 1
