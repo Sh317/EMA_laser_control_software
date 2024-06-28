@@ -1,5 +1,6 @@
 from pylablib.devices import M2
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 from epics import PV
 from .base import ControlLoop
@@ -18,17 +19,18 @@ class LaserControl(ControlLoop):
         self.p = 4.5
         #self.t_wnum = 0
         self.target = 0.0
-        self.gui_callback = gui_callback      
+        self.gui_callback = gui_callback    
+        self.reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
     async def etalon_lock_status(self):
         self.etalon_lock_status = self.laser.get_etalon_lock_status()
         return self.etalon_lock_status
     
+
     def _update(self):
         self.wnum = round(float(self.wavenumber.get()), 5)
 
 #        async def reference_cavity_lock_status(self):
 #            self.laser.get_reference_cavity_lock_status()
-        self.reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
 
 #        if self.etalon_lock_status == "off" or self.reference_cavity_lock_status == "off":
 #            self.unlock()
@@ -42,6 +44,7 @@ class LaserControl(ControlLoop):
             self.xDat = np.append(self.xDat, self.xDat[-1] + 100)
         self.yDat = np.append(self.yDat, self.wnum)
         self.fig = go.Figure(data=go.Scatter(x=self.xDat, y=self.yDat))
+        self.df = pd.DataFrame(data=self.yDat, index=self.xDat)
 
         if self.state == 1:
 
