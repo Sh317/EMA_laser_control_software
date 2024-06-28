@@ -2,6 +2,8 @@ import streamlit as st
 import sys
 import time
 import numpy as np
+import plotly.graph_objects as go
+import pandas as pd
 import asyncio
 
 sys.path.append('.\\src')
@@ -16,7 +18,7 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("Laser Control System")
+st.header("Laser Control System")
 
 sidebar = st.sidebar
 
@@ -61,13 +63,14 @@ def main():
                             key="t_wnum",                          
     #                        on_change=t_wnum_update                                               
                             )
-    p = col1.number_input("Proportional Gain", 
-                                value=4.50,
-                                step=0.01, 
-                                format="%0.2f",
-                                key="p",
-                                on_change=p_update
-                                )
+    # p = col1.number_input("Proportional Gain", 
+    #                             value=4.50,
+    #                             step=0.01, 
+    #                             format="%0.2f",
+    #                             key="p",
+    #                             on_change=p_update
+    #                             )
+    p = sidebar.slider("Proportional Gain", min_value=0., max_value=10., value=4.50, step=0.1, format="%0.2f", key="p")
 
     #etalon and cavity locks callback
     def etalon_lock_status():
@@ -121,20 +124,13 @@ def main():
         scan_button.button("Start Scan", on_click=start_scan)
 
     #Plotting
-    st.markdown("Plot")
-    plot = st.empty()
-
-
-
-    # placeholder for updating live parameters
-    placeholder = st.empty()
+    plotHolder = st.empty()
 
     while True:
         control_loop.update()
         c_wnum.metric(label="Current Wavenumber (cm^-1)", value=round(float(control_loop.wavenumber.get()), 5))
         #print(round(float(control_loop.wavenumber.get()), 5))
-        print(control_loop.dataToPlot)
-        plot.line_chart(control_loop.dataToPlot, x_label="Indices", y_label="Wavenumber (cm^-1)", width=800, height=400)
+        plotHolder.plotly_chart(control_loop.fig)
         time.sleep(0.1)
 
 if __name__ == "__main__":

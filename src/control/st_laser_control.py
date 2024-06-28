@@ -1,5 +1,6 @@
 from pylablib.devices import M2
 import numpy as np
+import plotly.graph_objects as go
 from epics import PV
 from .base import ControlLoop
 import asyncio
@@ -40,7 +41,7 @@ class LaserControl(ControlLoop):
         else:
             self.xDat = np.append(self.xDat, self.xDat[-1] + 100)
         self.yDat = np.append(self.yDat, self.wnum)
-        self.dataToPlot = np.array([self.xDat, self.yDat])
+        self.fig = go.Figure(data=go.Scatter(x=self.xDat, y=self.yDat))
 
         if self.state == 1:
 
