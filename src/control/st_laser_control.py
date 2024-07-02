@@ -17,14 +17,15 @@ class LaserControl(ControlLoop):
         self.xDat = np.array([])
         self.yDat = np.array([])
         self.p = 4.5
-        #self.t_wnum = 0
         self.target = 0.0
-        self.gui_callback = gui_callback    
+        self.gui_callback = gui_callback   
+        #A list of commands to be sent to the laser 
         self.reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
-    async def etalon_lock_status(self):
         self.etalon_lock_status = self.laser.get_etalon_lock_status()
-        return self.etalon_lock_status
-    
+        self.etalon_tuner_value = self.laser.get_full_web_status()['etalon_tune']
+        self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
+
+
 
     def _update(self):
         self.wnum = round(float(self.wavenumber.get()), 5)
@@ -95,6 +96,24 @@ class LaserControl(ControlLoop):
         self.xDat = np.array([])
         self.yDat = np.array([])
 
+    def lock_etalon(self):
+            self.laser.lock_etalon()
+
+    def unlock_etalon(self):
+        self.laser.unlock_etalon()
+
+    def lock_reference_cavity(self):
+        self.laser.lock_reference_cavity()
+
+    def unlock_reference_cavity(self):
+        self.laser.unlock_reference_cavity()
+
+    def tune_reference_cavity(self, value):
+        self.laser.tune_reference_cavity(value)
+
+    def tune_etalon(self, value):
+        self.laser.tune_etalon(value)
+
     def start_scan(self, start, end, no_scans, time_per_scan):
         self.scan_targets = np.linspace(start, end, no_scans)
         self.time_ps = time_per_scan * 1000
@@ -119,4 +138,3 @@ class LaserControl(ControlLoop):
             self.p = float(value)
         except ValueError:
             self.p = 0
-

@@ -1,10 +1,10 @@
 import streamlit as st
+import streamlit_shortcuts as st_shortcuts
 import sys
 import time
 import numpy as np
 import plotly.graph_objects as go
 import pandas as pd
-import asyncio
 
 sys.path.append('.\\src')
 from control.st_laser_control import LaserControl
@@ -21,17 +21,10 @@ st.set_page_config(
 st.header("Laser Control System")
 
 sidebar = st.sidebar
-
 # select which laser to control
 i = sidebar.selectbox("Select Laser", ["Laser 1", "Laser 2", "Laser 3", "Laser 4"], index=0)
-l1, l2, l3 = sidebar.columns([1.5,1,1])
-lock_toggle = l1.toggle("Lock", key="lock")
-etalon_state = l2.empty()
-cavity_state = l3.empty()
-
 tag = f"wavenumber_{i.split(" ")[1]}"
 control_loop = LaserControl("192.168.1.222", 39933, f"LaserLab:{tag}")
-
 
 
 def main(): 
@@ -47,22 +40,85 @@ def main():
         if rerun:
             st.rerun()
 
-    #locks   
+    #sidebar
+
+    tab1, tab2 = sidebar.tabs(["Control", "Scan"])
+
+    #tab1 - Control
+    tab1.header("Locks")
+    l1, l2, l3 = tab1.columns([1, 1, 3], vertical_alignment="center")
+
+
+
+
+    #locks
+    l1.write("**Etalon**")
+    etalon_lock = l2.empty()
+    etalon_tuner = l3.empty()
+
+    ll1, ll2, ll3 = tab1.columns([1, 1, 3], vertical_alignment="center")
+    ll1.write("**Cavity**")
+    cavity_lock = ll2.empty()
+    cavity_tuner = ll3.empty()
+
+
+    def etalon_lock_status():
+        e_status = control_loop.etalon_lock_status
+        assert isinstance(e_status, str) and e_status in ["on", "off"], f"Invalid etalon lock status: {e_status}"
+        return "🔐" if  e_status == "on" else "🔓"
+    
+    if "etalon_lock" not in st.session_state:
+        st.session_state["etalon_lock"] = etalon_lock_status()
+
+    
+    def lock_etalon():
+        if control_loop.etalon_lock_status == "on":
+            control_loop.unlock_etalon()
+            st.session_state["etalon_lock"] = "🔓"
+        if control_loop.etalon_lock_status == "off":
+            control_loop.lock_etalon()
+            st.session_state["etalon_lock"] = "🔐"
+
+
+    etalon_lock.button(label=str(st.session_state["etalon_lock"]), on_click=lock_etalon, key="etalon_lock_button")
+    
+    def cavity_lock_status():
+        c_status = control_loop.reference_cavity_lock_status
+        assert isinstance(c_status, str) and c_status in ["on", "off"], f"Invalid cavity lock status: {c_status}"
+        return "🔐" if  c_status == "on" else "🔓"
+    
+    if "cavity_lock" not in st.session_state:
+        st.session_state["cavity_lock"] = cavity_lock_status()
+    
+
+    def lock_cavity():
+        if control_loop.reference_cavity_lock_status == "on":
+            control_loop.unlock_reference_cavity()
+            st.session_state["cavity_lock"] = "🔓"
+        if control_loop.reference_cavity_lock_status == "off":
+            control_loop.lock_reference_cavity()
+            st.session_state["cavity_lock"] = "🔐"
+    
+    cavity_lock.button(label=str(st.session_state["cavity_lock"]), on_click=lock_cavity, key="cavity_lock_button")   
+
+    #print(control_loop.laser.get_full_status().keys())
+    etalon_tuner.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=round(float(control_loop.etalon_tuner_value),5),format="%0.5f")
+    cavity_tuner.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.reference_cavity_tuner_value),5),format="%0.5f")
 
     # current wavenumber, target wavenumber, and proportional gain
     #def t_wnum_update():
     #    control_loop.t_wnum_update(st.session_state.t_wnum)
-    def p_update():
-        control_loop.p_update(st.session_state.p)
-    # c_wnum = col1.empty()
-
-    t_wnum = sidebar.number_input("Target Wavenumber (cm^-1)",  
+    a1, a2= tab1.columns([4, 1], vertical_alignment="bottom")
+    t_wnum = a1.number_input("Target Wavenumber (cm^-1)",  
                             value=round(float(control_loop.wavenumber.get()), 5), 
                             step=0.00001, 
                             format="%0.5f",
-                            key="t_wnum",                          
-    #                        on_change=t_wnum_update                                               
+                            key="t_wnum",                                                                         
                             )
+    freq_lock_toggle = a2.button("$\lambda$ Lock", key="freq_lock")
+
+    def p_update():
+        control_loop.p_update(st.session_state.p)
     # p = col1.number_input("Proportional Gain", 
     #                             value=4.50,
     #                             step=0.01, 
@@ -70,61 +126,49 @@ def main():
     #                             key="p",
     #                             on_change=p_update
     #                             )
-    p = sidebar.slider("Proportional Gain", min_value=0., max_value=10., value=4.50, step=0.1, format="%0.2f", key="p")
+    p = tab1.slider("Proportional Gain", min_value=0., max_value=10., value=4.50, step=0.1, format="%0.2f", key="p")
 
-    #etalon and cavity locks callback
-    def etalon_lock_status():
-        e_status = asyncio.run(control_loop.etalon_lock_status())
-        assert isinstance(e_status, str) and e_status in ["on", "off"], f"Invalid etalon lock status: {e_status}"
-        return "🔐" if  e_status == "on" else "🔓"
 
-    def cavity_lock_status():
-        c_status = control_loop.reference_cavity_lock_status
-        assert isinstance(c_status, str) and c_status in ["on", "off"], f"Invalid etalon lock status: {c_status}"
-        return "🔐" if  c_status == "on" else "🔓"
-        
-    etalon_state.metric("Etalon", value=etalon_lock_status())
-    cavity_state.metric("Cavity", value=cavity_lock_status())
-
-    if lock_toggle:
-        if control_loop.reference_cavity_lock_status == "on" and asyncio.run(control_loop.etalon_lock_status()) == "on":
+    if freq_lock_toggle:
+        if control_loop.reference_cavity_lock_status == "on" and control_loop.etalon_lock_status == "on":
             control_loop.lock(t_wnum)
         else:
             control_loop.unlock()
             st.toast("Something is not locked!")
 
-    #scan setttings
-    with sidebar.expander("Scan Settings"):
-        c1, c2 = st.columns(2, vertical_alignment='bottom')
-        scan_button = c1.empty()
-        c2.write("")
-        start_wnum = c1.number_input("Start Wavenumber (cm^-1)", 
-                                    value=round(float(control_loop.wavenumber.get()), 5),
-                                    step=0.00001, 
-                                    format="%0.5f"
+    #tab2 - Scan Setttings
+    c1, c2 = tab2.columns(2, vertical_alignment='bottom')
+    scan_button = c1.empty()
+    c2.write("")
+    start_wnum = c1.number_input("Start Wavenumber (cm^-1)", 
+                                value=round(float(control_loop.wavenumber.get()), 5),
+                                step=0.00001, 
+                                format="%0.5f"
+                                )
+    end_wnum = c2.number_input("End Wavenumber (cm^-1)", 
+                                value=round(float(control_loop.wavenumber.get()), 5),
+                                step=0.00001, 
+                                format="%0.5f"
+                                )
+    no_of_steps = c1.number_input("No. of Steps", 
+                                value=5,
+                                max_value=50
+                                )
+    time_per_scan = c2.number_input("Time per scan (sec)", 
+                                    value=2.0,
+                                    step=0.1
                                     )
-        end_wnum = c2.number_input("End Wavenumber (cm^-1)", 
-                                    value=round(float(control_loop.wavenumber.get()), 5),
-                                    step=0.00001, 
-                                    format="%0.5f"
-                                    )
-        no_of_steps = c1.number_input("No. of Steps", 
-                                    value=5,
-                                    max_value=50
-                                    )
-        time_per_scan = c2.number_input("Time per scan (sec)", 
-                                        value=2.0,
-                                        step=0.1
-                                        )
-        def start_scan():
-            control_loop.start_scan(start_wnum, end_wnum, no_of_steps, time_per_scan)
-            st.toast("Scan started!")
-        scan_button.button("Start Scan", on_click=start_scan)
+    def start_scan():
+        control_loop.start_scan(start_wnum, end_wnum, no_of_steps, time_per_scan)
+        st.toast("Scan started!")
+    scan_button.button("Start Scan", on_click=start_scan)
+
+
+    #Main body
 
     #Plotting
     plot = st.empty()
     dataf_space = st.empty()
-    mkspace = st.empty()
 
     while True:
         control_loop.update()
@@ -139,11 +183,6 @@ def main():
             plot.plotly_chart(fig, use_container_width=True)
             dataf_space.metric(label="Current Wavenumber", value=wn[-1])
 
-    
-        mkspace.markdown("""
-                Laboratory of Exotic Molecules and Atoms @ MIT
-                Our group is focused on the study of atoms and molecules containing short-lived radioactive nuclei for fundamental physics research. Precision measurements of their atomic and molecular structures provide a unique insight into the emergence of nuclear phenomena and the properties of nuclear matter at the limits of existence. Moreover, these radioactive systems have the potential to offer a new window for our exploration of the fundamental forces of nature and the search for new physics beyond the Standard Model of particle physics.
-                       """)
         time.sleep(0.1)
         
 
