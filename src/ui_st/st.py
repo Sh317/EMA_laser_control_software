@@ -3,14 +3,17 @@ import streamlit_shortcuts as st_shortcuts
 import sys
 import time
 import numpy as np
-import plotly.graph_objects as go
+import plotly
+import cufflinks as cf
 import pandas as pd
 
+setattr(plotly.offline, "__PLOTLY_OFFLINE_INITIALIZED", True)
 sys.path.append('.\\src')
 from control.st_laser_control import LaserControl
 
 
-
+cf.set_config_file(world_readable=True,theme='white')
+cf.go_offline()
 
 st.set_page_config(
     page_title="Laser Control System",
@@ -41,7 +44,6 @@ def main():
             st.rerun()
 
     #sidebar
-
     tab1, tab2 = sidebar.tabs(["Control", "Scan"])
 
     #tab1 - Control
@@ -137,31 +139,32 @@ def main():
             st.toast("Something is not locked!")
 
     #tab2 - Scan Setttings
-    c1, c2 = tab2.columns(2, vertical_alignment='bottom')
-    scan_button = c1.empty()
-    c2.write("")
-    start_wnum = c1.number_input("Start Wavenumber (cm^-1)", 
-                                value=round(float(control_loop.wavenumber.get()), 5),
-                                step=0.00001, 
-                                format="%0.5f"
-                                )
-    end_wnum = c2.number_input("End Wavenumber (cm^-1)", 
-                                value=round(float(control_loop.wavenumber.get()), 5),
-                                step=0.00001, 
-                                format="%0.5f"
-                                )
-    no_of_steps = c1.number_input("No. of Steps", 
-                                value=5,
-                                max_value=50
-                                )
-    time_per_scan = c2.number_input("Time per scan (sec)", 
-                                    value=2.0,
-                                    step=0.1
-                                    )
     def start_scan():
         control_loop.start_scan(start_wnum, end_wnum, no_of_steps, time_per_scan)
+        print("something happened")
         st.toast("Scan started!")
-    scan_button.button("Start Scan", on_click=start_scan)
+    with tab2.form("scan_settings", border=False):
+        c1, c2 = st.columns(2, vertical_alignment='bottom')
+
+        start_wnum = c1.number_input("Start Wavenumber (cm^-1)", 
+                                    value=round(float(control_loop.wavenumber.get()), 5),
+                                    step=0.00001, 
+                                    format="%0.5f"
+                                    )
+        end_wnum = c2.number_input("End Wavenumber (cm^-1)", 
+                                    value=round(float(control_loop.wavenumber.get()), 5),
+                                    step=0.00001, 
+                                    format="%0.5f"
+                                    )
+        no_of_steps = c1.number_input("No. of Steps", 
+                                    value=5,
+                                    max_value=50
+                                    )
+        time_per_scan = c2.number_input("Time per scan (sec)", 
+                                        value=2.0,
+                                        step=0.1
+                                        )
+        scan_button = st.form_submit_button("Start Scan", on_click="start_scan")
 
 
     #Main body
@@ -171,16 +174,27 @@ def main():
     dataf_space = st.empty()
 
     while True:
-        control_loop.update()
+        try:
+            control_loop.update()
+        except Exception as e:
+            st.error("Umm...Something went wrong...", icon="🚨")
+            e1, e2 = st.columns(2)
+            with e1.popover(label="View Error Details"):
+                st.write(f"Error: {str(e)}")
+            rerun = e2.button("Try Again!", type="primary")
+            if rerun:
+                st.rerun()
         # c_wnum.metric(label="Current Wavenumber (cm^-1)", value=round(float(control_loop.wavenumber.get()), 5))
         # Time series plot
         ts, wn = control_loop.xDat, control_loop.yDat
         if len(ts) > 0 and len(wn) > 0:
-            dataf = pd.DataFrame({"Wavenumber (cm^-1)": wn, "Time (sec)": ts})
-            fig = go.Figure(data=go.Scatter(x=ts, y=wn), layout=go.Layout(
-                xaxis=dict(title="time"), yaxis=dict(title="wavenumber", exponentformat="none")
-                ))
-            plot.plotly_chart(fig, use_container_width=True)
+            dataf = pd.DataFrame({"Wavenumber (cm^-1)": wn}, index = ts)
+            fig = dataf.iplot(kind="scatter", xTitle="Time(s)", yTitle="Wavenumber (cm^-1)", asFigure = True, mode = "lines+markers", colors=["pink"])
+            fig.update_yaxes(exponentformat="none")
+            #fig = go.Figure(data=go.Scatter(x=ts, y=wn), layout=go.Layout(
+            #    xaxis=dict(title="time"), yaxis=dict(title="wavenumber", exponentformat="none")
+            #    ))
+            plot.plotly_chart(fig)
             dataf_space.metric(label="Current Wavenumber", value=wn[-1])
 
         time.sleep(0.1)
