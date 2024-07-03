@@ -67,17 +67,21 @@ def main():
     def etalon_lock_status():
         e_status = control_loop.etalon_lock_status
         assert isinstance(e_status, str) and e_status in ["on", "off"], f"Invalid etalon lock status: {e_status}"
-        return "🔐" if  e_status == "on" else "🔓"
+        return True if  e_status == "on" else False
     
+    etalon_lock_status = etalon_lock_status()
     if "etalon_lock" not in st.session_state:
-        st.session_state["etalon_lock"] = etalon_lock_status()
+        if etalon_lock_status:
+            st.session_state["etalon_lock"] = "🔐"
+        else:
+            st.session_state["etalon_lock"] = "🔓"
 
     
     def lock_etalon():
-        if control_loop.etalon_lock_status == "on":
+        if etalon_lock_status:
             control_loop.unlock_etalon()
             st.session_state["etalon_lock"] = "🔓"
-        if control_loop.etalon_lock_status == "off":
+        else:
             control_loop.lock_etalon()
             st.session_state["etalon_lock"] = "🔐"
 
@@ -87,62 +91,67 @@ def main():
     def cavity_lock_status():
         c_status = control_loop.reference_cavity_lock_status
         assert isinstance(c_status, str) and c_status in ["on", "off"], f"Invalid cavity lock status: {c_status}"
-        return "🔐" if  c_status == "on" else "🔓"
+        return True if  c_status == "on" else False
     
+    cavity_lock_status = cavity_lock_status()
     if "cavity_lock" not in st.session_state:
-        st.session_state["cavity_lock"] = cavity_lock_status()
-    
+        if cavity_lock_status:
+            st.session_state["cavity_lock"] = "🔐"
+        else:
+            st.session_state["cavity_lock"] = "🔓"
 
     def lock_cavity():
-        if control_loop.reference_cavity_lock_status == "on":
+        if cavity_lock_status:
             control_loop.unlock_reference_cavity()
             st.session_state["cavity_lock"] = "🔓"
-        if control_loop.reference_cavity_lock_status == "off":
+        else:
             control_loop.lock_reference_cavity()
             st.session_state["cavity_lock"] = "🔐"
     
     cavity_lock.button(label=str(st.session_state["cavity_lock"]), on_click=lock_cavity, key="cavity_lock_button")   
 
     #print(control_loop.laser.get_full_status().keys())
-    etalon_tuner.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=round(float(control_loop.etalon_tuner_value),5),format="%0.5f")
-    cavity_tuner.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.reference_cavity_tuner_value),5),format="%0.5f")
+    etalon_tuner.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=round(float(control_loop.etalon_tuner_value),5), format="%0.5f", disabled=etalon_lock_status)
+    cavity_tuner.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.reference_cavity_tuner_value),5), format="%0.5f", disabled=cavity_lock_status)
 
     # current wavenumber, target wavenumber, and proportional gain
     #def t_wnum_update():
     #    control_loop.t_wnum_update(st.session_state.t_wnum)
-    a1, a2= tab1.columns([4, 1], vertical_alignment="bottom")
-    t_wnum = a1.number_input("Target Wavenumber (cm^-1)",  
-                            value=round(float(control_loop.wavenumber.get()), 5), 
-                            step=0.00001, 
-                            format="%0.5f",
-                            key="t_wnum",                                                                         
-                            )
-    freq_lock_toggle = a2.button("$\lambda$ Lock", key="freq_lock")
+    with tab1.form("Lock Wavenumber", border=False):
+        a1, a2= st.columns([4, 1], vertical_alignment="bottom")
+        t_wnum = a1.number_input("Target Wavenumber (cm^-1)",  
+                                value=round(float(control_loop.wavenumber.get()), 5), 
+                                step=0.00001, 
+                                format="%0.5f",
+                                key="t_wnum",                                                                         
+                                )
+        freq_lock_button = a2.form_submit_button("$\lambda$ Lock")
 
+    #PID Control
+    tab1.header("PID Control")
     def p_update():
         control_loop.p_update(st.session_state.p)
-    # p = col1.number_input("Proportional Gain", 
-    #                             value=4.50,
-    #                             step=0.01, 
-    #                             format="%0.2f",
-    #                             key="p",
-    #                             on_change=p_update
-    #                             )
-    p = tab1.slider("Proportional Gain", min_value=0., max_value=10., value=4.50, step=0.1, format="%0.2f", key="p")
+    with tab1.form("PID Control", border=False):
+        p = st.slider("Proportional Gain", min_value=0., max_value=10., value=4.50, step=0.1, format="%0.2f", key="p")
+        st.form_submit_button("Update", on_click=p_update)
 
 
-    if freq_lock_toggle:
+    if freq_lock_button:
         if control_loop.reference_cavity_lock_status == "on" and control_loop.etalon_lock_status == "on":
             control_loop.lock(t_wnum)
+            st.toast("✅ Wavelength locked!")
         else:
             control_loop.unlock()
-            st.toast("Something is not locked!")
+            st.toast("❗ Something is not locked! ❗")
+
+
 
     #tab2 - Scan Setttings
+    tab2.header("Scan Settings")
     def start_scan():
         control_loop.start_scan(start_wnum, end_wnum, no_of_steps, time_per_scan)
         print("something happened")
-        st.toast("Scan started!")
+        st.toast("👀 Scan started!")
     with tab2.form("scan_settings", border=False):
         c1, c2 = st.columns(2, vertical_alignment='bottom')
 
@@ -164,14 +173,16 @@ def main():
                                         value=2.0,
                                         step=0.1
                                         )
-        scan_button = st.form_submit_button("Start Scan", on_click="start_scan")
+        scan_button = st.form_submit_button("Start Scan", on_click=start_scan)
 
 
     #Main body
 
     #Plotting
     plot = st.empty()
-    dataf_space = st.empty()
+    place1, place2 = st.columns(2, vertical_alignment="center")
+    dataf_space = place1.empty()
+    reading_rate = place2.empty()
 
     while True:
         try:
@@ -184,18 +195,20 @@ def main():
             rerun = e2.button("Try Again!", type="primary")
             if rerun:
                 st.rerun()
-        # c_wnum.metric(label="Current Wavenumber (cm^-1)", value=round(float(control_loop.wavenumber.get()), 5))
+
         # Time series plot
-        ts, wn = control_loop.xDat, control_loop.yDat
+        ts, wn, ts_with_time, wn_with_time = control_loop.xDat, control_loop.yDat, control_loop.xDat_with_time, control_loop.yDat_with_time
         if len(ts) > 0 and len(wn) > 0:
             dataf = pd.DataFrame({"Wavenumber (cm^-1)": wn}, index = ts)
-            fig = dataf.iplot(kind="scatter", xTitle="Time(s)", yTitle="Wavenumber (cm^-1)", asFigure = True, mode = "lines+markers", colors=["pink"])
+            fig = dataf.iplot(kind="scatter", title = "Wavenumber VS Time", xTitle="Time(s)", yTitle="Wavenumber (cm^-1)", asFigure = True, mode = "lines+markers", colors=["pink"])
+            fig.update_xaxes(exponentformat="none")
             fig.update_yaxes(exponentformat="none")
-            #fig = go.Figure(data=go.Scatter(x=ts, y=wn), layout=go.Layout(
-            #    xaxis=dict(title="time"), yaxis=dict(title="wavenumber", exponentformat="none")
-            #    ))
             plot.plotly_chart(fig)
             dataf_space.metric(label="Current Wavenumber", value=wn[-1])
+            df_toSave = pd.DataFrame({'Time': ts_with_time, 'Wavenumber': wn_with_time})
+            #print(df_toSave)
+        
+        reading_rate.metric(label="Reading Rate (ms)", value=control_loop.rate)
 
         time.sleep(0.1)
         

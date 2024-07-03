@@ -3,6 +3,7 @@ import numpy as np
 from epics import PV
 from .base import ControlLoop
 import asyncio
+import datetime
 
 
 class LaserControl(ControlLoop):
@@ -14,9 +15,13 @@ class LaserControl(ControlLoop):
         self.scan = 0
         self.xDat = np.array([])
         self.yDat = np.array([])
+        self.xDat_with_time = []
+        self.yDat_with_time = np.array([])
         self.p = 4.5
         self.target = 0.0
-        self.gui_callback = gui_callback   
+        self.gui_callback = gui_callback
+        self.rate = 100  #in milliseconds
+        self.now = datetime.datetime.now()
         #A list of commands to be sent to the laser 
         self.reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
         self.etalon_lock_status = self.laser.get_etalon_lock_status()
@@ -39,9 +44,12 @@ class LaserControl(ControlLoop):
             self.yDat = np.delete(self.yDat, 0)
         if len(self.xDat) == 0:
             self.xDat = np.array([0])
+            self.xDat_with_time.append(self.now) 
         else:
-            self.xDat = np.append(self.xDat, self.xDat[-1] + 100)
+            self.xDat = np.append(self.xDat, self.xDat[-1] + self.rate)    
+            self.xDat_with_time.append(self.xDat_with_time[-1] + self.time_converter(self.rate))
         self.yDat = np.append(self.yDat, self.wnum)
+        self.yDat_with_time = np.append(self.yDat_with_time, self.wnum)
 
         if self.state == 1:
 
@@ -120,17 +128,14 @@ class LaserControl(ControlLoop):
         self.scan_time = 0
         self.j = 0
 
-    def stop(self):
-        pass
-
-    #def t_wnum_update(self, value):
-    #    try:
-    #        self.t_wnum = float(value)
-    #    except ValueError:
-    #        self.twnum = 0
-
     def p__update(self, value):
         try:
             self.p = float(value)
         except ValueError:
             self.p = 0
+
+    def time_converter(self, value):
+        return datetime.timedelta(milliseconds = value)
+    
+    def stop(self):
+        pass
