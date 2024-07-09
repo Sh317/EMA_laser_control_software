@@ -4,11 +4,14 @@ from epics import PV
 from .base import ControlLoop
 import asyncio
 import datetime
-
+import time
 
 class LaserControl(ControlLoop):
     def __init__(self, ip_address, port, wavenumber_pv, gui_callback=None):
-        self.laser = M2.Solstis(ip_address, port)
+        self.laser = None
+        self.ip_address = ip_address
+        self.port = port    
+        self.patient_laser_init()
         self.wavenumber = PV(wavenumber_pv)
         self.wnum = round(float(self.wavenumber.get()), 5)
         self.state = 0
@@ -23,12 +26,48 @@ class LaserControl(ControlLoop):
         self.rate = 100  #in milliseconds
         self.now = datetime.datetime.now()
         #A list of commands to be sent to the laser 
-        self.reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
-        self.etalon_lock_status = self.laser.get_etalon_lock_status()
-        self.etalon_tuner_value = self.laser.get_full_web_status()['etalon_tune']
-        self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
+        self.patient_setup_status()
 
+    def patient_laser_init(self, tryouts = 2) -> None:
+        laser_set = 0
+        tries = 0
+        if self.laser:
+            pass
+        while not laser_set:
+            try:
+                self.laser = M2.Solstis(self.ip_address, self.port)
+                laser_set = True
+                break
+            except Exception as e:
+                print(f"Unable to connect to laser. Retrying... Error: {e}")
+                print(tries)
+                if tries >= tryouts:
+                    print(f"Unable to connect to laser after {tryouts} tries. Error: {e}")
+                    raise ConnectionRefusedError
+                else:
+                    tries += 1
 
+    def patient_setup_status(self, tryouts = 2) -> None:
+        if not self.laser:
+            raise ConnectionError
+        status_set = 0
+        tries = 0
+        while not status_set:
+            try:
+                self.reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
+                self.etalon_lock_status = self.laser.get_etalon_lock_status()
+                self.etalon_tuner_value = self.laser.get_full_web_status()['etalon_tune']
+                self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
+                status_set = True
+                break
+            except Exception as e:
+                print(f"Unable to get patient setup status. Retrying... Error: {e}")
+                print(tries)
+                if tries >=tryouts:
+                    print(f"Unable to set patient setup status after {tryouts} tries. Error: {e}")
+                    raise ConnectionRefusedError
+                else:
+                    tries += 1
 
     def _update(self):
         self.wnum = round(float(self.wavenumber.get()), 5)

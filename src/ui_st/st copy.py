@@ -44,19 +44,6 @@ def patient_netconnect(tryouts = 10):
             raise ConnectionError
             break
 
-@st.cache_data
-def convert_df(df):
-   return df.to_csv(index=False).encode('utf-8')
-
-# @st.cache_data(persist=True)
-def save_to_data(df):
-    st.download_button(
-    "Press to Download",
-    convert_df(df),
-    "file.csv",
-    "text/csv",
-    key='download-csv'
-    )
 
 def main(): 
     #1/0
@@ -216,9 +203,17 @@ def main():
     place1, place2, place3 = st.columns(3, vertical_alignment="center")
     dataf_space = place1.empty()
     reading_rate = place2.empty()
-    save_button = place3.button("Save")
+    
+    if "save_clicked" not in st.session_state:
+        st.session_state.save_clicked = "False"
 
+    def set_state():
+        st.session_state.save_clicked = "True"
 
+    @st.experimental_fragment
+    def save():
+        b = st.button("Save", on_click=set_state)
+        
 
     @st.experimental_dialog("Save As")
     def save_file(data):
@@ -233,15 +228,11 @@ def main():
             except Exception as e:
                 st.error(f"**Failed to save file due to an error:** {e}")
     
+    with place3:
+        save()
 
 
-
-    if save_button:
-        save_file(st.session_state.df_toSave)
-        st.stop()
     while True:
-        if "df_toSave" not in st.session_state:
-            st.session_state.df_toSave = None
         try:
             control_loop.update()
         except Exception as e:
@@ -262,12 +253,19 @@ def main():
             fig.update_yaxes(exponentformat="none")
             plot.plotly_chart(fig)
             dataf_space.metric(label="Current Wavenumber", value=wn[-1])
-            st.session_state.df_toSave = pd.DataFrame({'Time': ts_with_time, 'Wavenumber': wn_with_time})
+            df_toSave = pd.DataFrame({'Time': ts_with_time, 'Wavenumber': wn_with_time})
             #print(df_toSave)
         
         reading_rate.metric(label="Reading Rate (ms)", value=control_loop.rate)
         
+        if st.session_state.save_clicked == True:
+            save_file(df_toSave)
+            st.stop()
+
+        print(st.session_state.save_clicked)
         time.sleep(0.1)
+
+
         
 
 
