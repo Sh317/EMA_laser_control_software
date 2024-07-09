@@ -2,7 +2,6 @@ from pylablib.devices import M2
 import numpy as np
 from epics import PV
 from .base import ControlLoop
-import asyncio
 import datetime
 import time
 
@@ -63,7 +62,7 @@ class LaserControl(ControlLoop):
             except Exception as e:
                 print(f"Unable to get patient setup status. Retrying... Error: {e}")
                 print(tries)
-                if tries >=tryouts:
+                if tries == tryouts:
                     print(f"Unable to set patient setup status after {tryouts} tries. Error: {e}")
                     raise ConnectionRefusedError
                 else:

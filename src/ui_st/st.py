@@ -33,30 +33,15 @@ control_loop = False
 def patient_netconnect(tryouts = 10):
     tries = 0
     global control_loop
-    while not control_loop:
+    while tries <= tryouts:
         try:
             control_loop = LaserControl("192.168.1.222", 39933, f"LaserLab:{tag}")
             break
         except:
-            st.rerun()
             tries += 1
-        if tries >= tryouts:
-            raise ConnectionError
-            break
+            st.rerun()
+    raise ConnectionError
 
-@st.cache_data
-def convert_df(df):
-   return df.to_csv(index=False).encode('utf-8')
-
-# @st.cache_data(persist=True)
-def save_to_data(df):
-    st.download_button(
-    "Press to Download",
-    convert_df(df),
-    "file.csv",
-    "text/csv",
-    key='download-csv'
-    )
 
 def main(): 
     #1/0
@@ -219,7 +204,6 @@ def main():
     save_button = place3.button("Save")
 
 
-
     @st.experimental_dialog("Save As")
     def save_file(data):
         filename = st.text_input("File Name:", placeholder="Enter the file name...")
@@ -234,11 +218,11 @@ def main():
                 st.error(f"**Failed to save file due to an error:** {e}")
     
 
-
-
     if save_button:
         save_file(st.session_state.df_toSave)
         st.stop()
+
+        
     while True:
         if "df_toSave" not in st.session_state:
             st.session_state.df_toSave = None
