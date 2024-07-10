@@ -40,7 +40,8 @@ def patient_netconnect(tryouts = 10):
         except:
             tries += 1
             st.rerun()
-    raise ConnectionError
+    if tries > tryouts:
+        raise ConnectionError
 
 
 def main(): 
@@ -49,7 +50,7 @@ def main():
         patient_netconnect()
         control_loop.update()
     except Exception as e:
-        st.error("Umm...Something went wrong...", icon="🚨")
+        st.error("Umm...Something went wrong... at first", icon="🚨")
         e1, e2 = st.columns(2)
         with e1.popover(label="View Error Details"):
             st.write(f"Error: {str(e)}")
@@ -57,6 +58,7 @@ def main():
         if rerun:
             st.rerun()
 
+    state = st.session_state
     #sidebar
     tab1, tab2 = sidebar.tabs(["Control", "Scan"])
 
@@ -163,21 +165,23 @@ def main():
     tab2.header("Scan Settings")
     def start_scan():
         control_loop.start_scan(start_wnum, end_wnum, no_of_steps, time_per_scan)
-        print("something happened")
         st.toast("👀 Scan started!")
-    
 
-    @st.experimental_fragment
-    def scan_settings():
+    if "start_wnum" not in state:
+        state["start_wnum"] = round(float(control_loop.wavenumber.get()), 5)
+    if "end_wnum" not in st.session_state:
+        state["end_wnum"] = round(float(control_loop.wavenumber.get()), 5)
+
+    with tab2.form("scan_settings", border=False):
         c1, c2 = st.columns(2, vertical_alignment='bottom')
 
         start_wnum = c1.number_input("Start Wavenumber (cm^-1)", 
-                                    value=round(float(control_loop.wavenumber.get()), 5),
+                                    value=state.start_wnum,
                                     step=0.00001, 
                                     format="%0.5f"
                                     )
         end_wnum = c2.number_input("End Wavenumber (cm^-1)", 
-                                    value=round(float(control_loop.wavenumber.get()), 5),
+                                    value=state.end_wnum,
                                     step=0.00001, 
                                     format="%0.5f"
                                     )
@@ -189,8 +193,6 @@ def main():
                                         value=2.0,
                                         step=0.1
                                         )
-    with tab2.form("scan_settings", border=False):
-        scan_settings()
         scan_button = st.form_submit_button("Start Scan", on_click=start_scan)
 
 
@@ -229,7 +231,7 @@ def main():
         try:
             control_loop.update()
         except Exception as e:
-            st.error("Umm...Something went wrong...", icon="🚨")
+            st.error("Umm...Something went wrong in the loop...", icon="🚨")
             e1, e2 = st.columns(2)
             with e1.popover(label="View Error Details"):
                 st.write(f"Error: {str(e)}")
