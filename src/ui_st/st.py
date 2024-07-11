@@ -1,8 +1,8 @@
 import streamlit as st
-import streamlit_shortcuts as st_shortcuts
 import sys
 import os
 import time
+import traceback
 import numpy as np
 import plotly
 import cufflinks as cf
@@ -29,18 +29,36 @@ sidebar = st.sidebar
 i = sidebar.selectbox("Select Laser", ["Laser 1", "Laser 2", "Laser 3", "Laser 4"], index=0)
 tag = f"wavenumber_{i.split(" ")[1]}"
 control_loop = False
+state = st.session_state
 
+if "laser_state" not in state:
+    state.laser_state = 0
+ 
+def error_page(description, error):
+    st.error(description, icon="🚨")
+    e1, e2 = st.columns(2)
+    with e1.popover(label="View Error Details"):
+        st.write(f"Error: {str(error)} \n {traceback.format_exc()}")
+    rerun = e2.button("Try Again!", type="primary")
+    if rerun:
+        st.rerun()
+
+@st.cache_resource
 def patient_netconnect(tryouts = 10):
-    tries = 0
+    if "netcon_tries" not in state:
+        state.netcon_tries = 0
     global control_loop
-    while tries <= tryouts:
+    while state.netcon_tries <= tryouts:
         try:
             control_loop = LaserControl("192.168.1.222", 39933, f"LaserLab:{tag}")
+            print("class instantiated again")
             break
-        except:
-            tries += 1
+        except Exception as e:
+            state.netcon_tries += 1
+            print(f"Unable to initialize the laser control due to error: {e} \n {traceback.format_exc()}")
             st.rerun()
-    if tries > tryouts:
+    if state.netcon_tries > tryouts:
+        error_page(description=f"Unable to initialize the laser control after {tryouts} tries.", error=e)
         raise ConnectionError
 
 
@@ -49,21 +67,16 @@ def main():
     try:
         patient_netconnect()
         control_loop.update()
+        #control_loop.state = state.laser_state
     except Exception as e:
-        st.error("Umm...Something went wrong... at first", icon="🚨")
-        e1, e2 = st.columns(2)
-        with e1.popover(label="View Error Details"):
-            st.write(f"Error: {str(e)}")
-        rerun = e2.button("Try Again!", type="primary")
-        if rerun:
-            st.rerun()
+        error_page(description="Unable to communicate with the laser control module.", error=e)
 
-    state = st.session_state
+    #print("It has proceeded to the main part now")
     #sidebar
     tab1, tab2 = sidebar.tabs(["Control", "Scan"])
 
     #tab1 - Control
-    tab1.header("Locks")
+    tab1.header("SolsTis Control")
     l1, l2, l3 = tab1.columns([1, 1, 3], vertical_alignment="center")
 
 
@@ -125,47 +138,67 @@ def main():
     
     cavity_lock.button(label=str(st.session_state["cavity_lock"]), on_click=lock_cavity, key="cavity_lock_button")   
 
-    #print(control_loop.laser.get_full_status().keys())
     etalon_tuner.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=round(float(control_loop.etalon_tuner_value),5), format="%0.5f", disabled=etalon_lock_status)
     cavity_tuner.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.reference_cavity_tuner_value),5), format="%0.5f", disabled=cavity_lock_status)
 
-    # current wavenumber, target wavenumber, and proportional gain
-    #def t_wnum_update():
-    #    control_loop.t_wnum_update(st.session_state.t_wnum)
+
+    # Wavelength Locker and PID
+    tab1.header("Wavelength Locker")
+    # wlocker1, wlocker2 = tab1.columns([3.7, 1.3], vertical_alignment="bottom")
+    
+    if "freq_lock_clicked" not in state:
+        state["freq_lock_clicked"] = False
+    if "c_wnum" not in state:
+        state["c_wnum"] = round(float(control_loop.wavenumber.get()), 5)
+        
+    def freq_lock():
+        if control_loop.reference_cavity_lock_status == "on" and control_loop.etalon_lock_status == "on":
+            #print("st locked")
+            control_loop.lock(t_wnum)
+            state.laser_state = 1
+            state["freq_lock_clicked"] = True
+            state["start_wnum"] = t_wnum
+            st.toast("✅ Wavelength locked!")
+        else:
+            control_loop.unlock()
+            st.toast("❗ Something is not locked ❗")
+    
+    def freq_unlock():
+        control_loop.unlock()
+        st.toast("✅ Wavelength unlocked!")
+        state["freq_lock_clicked"] = False
+
+        
     with tab1.form("Lock Wavenumber", border=False):
-        a1, a2= st.columns([4, 1], vertical_alignment="bottom")
+        a1, a2= st.columns([2.7, 1], vertical_alignment="bottom")
         t_wnum = a1.number_input("Target Wavenumber (cm^-1)",  
-                                value=round(float(control_loop.wavenumber.get()), 5), 
+                                value=state.c_wnum, 
                                 step=0.00001, 
                                 format="%0.5f",
                                 key="t_wnum",                                                                         
                                 )
-        freq_lock_button = a2.form_submit_button(r"$\lambda$ Lock")
+        freq_lock_button = a2.form_submit_button(r"Lock", disabled=state.freq_lock_clicked, on_click=freq_lock)
+
+    freq_unlock_button = tab1.button(r"Unlock", disabled=not state.freq_lock_clicked, on_click=freq_unlock)
 
     #PID Control
-    tab1.header("PID Control")
+    tab1.subheader("PID Control")
     def p_update():
         control_loop.p_update(st.session_state.p)
     with tab1.form("PID Control", border=False):
         p = st.slider("Proportional Gain", min_value=0., max_value=10., value=4.50, step=0.1, format="%0.2f", key="p")
         st.form_submit_button("Update", on_click=p_update)
 
-
-    if freq_lock_button:
-        if control_loop.reference_cavity_lock_status == "on" and control_loop.etalon_lock_status == "on":
-            control_loop.lock(t_wnum)
-            st.toast("✅ Wavelength locked!")
-        else:
-            control_loop.unlock()
-            st.toast("❗ Something is not locked ❗")
-
-
+##################################################################################
 
     #tab2 - Scan Setttings
     tab2.header("Scan Settings")
     def start_scan():
-        control_loop.start_scan(start_wnum, end_wnum, no_of_steps, time_per_scan)
-        st.toast("👀 Scan started!")
+        if not state.freq_lock_clicked:
+            control_loop.start_scan(start_wnum, end_wnum, no_of_steps, time_per_scan)
+            st.toast("👀 Scan started!")
+        if state.freq_lock_clicked:
+            st.toast("👿 Unlock the wavelength first before starting a scan!")
 
     if "start_wnum" not in state:
         state["start_wnum"] = round(float(control_loop.wavenumber.get()), 5)
@@ -187,7 +220,7 @@ def main():
                                     )
         no_of_steps = c1.number_input("No. of Steps", 
                                     value=5,
-                                    max_value=50
+                                    max_value=500
                                     )
         time_per_scan = c2.number_input("Time per scan (sec)", 
                                         value=2.0,
@@ -195,7 +228,7 @@ def main():
                                         )
         scan_button = st.form_submit_button("Start Scan", on_click=start_scan)
 
-
+################################################################################
     #Main body
 
     #Plotting
@@ -228,16 +261,11 @@ def main():
     while True:
         if "df_toSave" not in st.session_state:
             st.session_state.df_toSave = None
+
         try:
             control_loop.update()
         except Exception as e:
-            st.error("Umm...Something went wrong in the loop...", icon="🚨")
-            e1, e2 = st.columns(2)
-            with e1.popover(label="View Error Details"):
-                st.write(f"Error: {str(e)}")
-            rerun = e2.button("Try Again!", type="primary")
-            if rerun:
-                st.rerun()
+            error_page(description="Unable to update laser information.", error=e)
 
         # Time series plot
         ts, wn, ts_with_time, wn_with_time = control_loop.xDat, control_loop.yDat, control_loop.xDat_with_time, control_loop.yDat_with_time
@@ -252,8 +280,9 @@ def main():
             #print(df_toSave)
         
         reading_rate.metric(label="Reading Rate (ms)", value=control_loop.rate)
-        
-        time.sleep(0.1)
+
+        sleep_time = control_loop.rate*0.001
+        time.sleep(1)
         
 
 

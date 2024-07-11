@@ -6,13 +6,13 @@ import datetime
 import time
 
 class LaserControl(ControlLoop):
-    def __init__(self, ip_address, port, wavenumber_pv, gui_callback=None):
+    def __init__(self, ip_address, port, wavenumber_pv):
         self.laser = None
         self.ip_address = ip_address
         self.port = port    
         self.patient_laser_init()
         self.wavenumber = PV(wavenumber_pv)
-        self.wnum = round(float(self.wavenumber.get()), 5)
+        self.wnum = None
         self.state = 0
         self.scan = 0
         self.xDat = np.array([])
@@ -21,8 +21,7 @@ class LaserControl(ControlLoop):
         self.yDat_with_time = np.array([])
         self.p = 4.5
         self.target = 0.0
-        self.gui_callback = gui_callback
-        self.rate = 100  #in milliseconds
+        self.rate = 100.  #in milliseconds
         self.now = datetime.datetime.now()
         #A list of commands to be sent to the laser 
         self.patient_setup_status()
@@ -62,20 +61,15 @@ class LaserControl(ControlLoop):
             except Exception as e:
                 print(f"Unable to get patient setup status. Retrying... Error: {e}")
                 print(tries)
-                if tries == tryouts:
+                if tries >= tryouts:
                     print(f"Unable to set patient setup status after {tryouts} tries. Error: {e}")
                     raise ConnectionRefusedError
                 else:
                     tries += 1
 
     def _update(self):
+        print(self.state)
         self.wnum = round(float(self.wavenumber.get()), 5)
-
-#        async def reference_cavity_lock_status(self):
-#            self.laser.get_reference_cavity_lock_status()
-
-#        if self.etalon_lock_status == "off" or self.reference_cavity_lock_status == "off":
-#            self.unlock()
 
         if len(self.xDat) == 60:
             self.xDat = np.delete(self.xDat, 0)
@@ -89,35 +83,22 @@ class LaserControl(ControlLoop):
         self.yDat = np.append(self.yDat, self.wnum)
         self.yDat_with_time = np.append(self.yDat_with_time, self.wnum)
 
-        if self.state == 1:
-
-            # Simple proportional control
-            delta = self.target - self.wnum
-            u = self.p * delta
-            cavity = self.laser.get_full_status(include=["web_status"])["web_status"][
-                "cavity_tune"
-            ]
-            self.laser.tune_reference_cavity(float(cavity) - u)
-
-            if self.gui_callback:
-                self.gui_callback(self.wnum, self.xDat, self.yDat)
-            #what is this for?
-
         if self.scan == 1:
-            delta = self.target - self.wnum
-            if abs(delta) <= 0.00005 and not self.do_time:
-                self.do_time = 1
-            if self.do_time:
-                self.scan_time += 100
-            if self.scan_time == self.time_ps:
-                self.j += 1
-                self.scan_time = 0
-                try:
-                    self.target = self.scan_targets[self.j]
-                    self.do_time = 0
-                except IndexError:
-                    self.scan = 0
-                    self.state = 0
+            self._do_scan()
+
+        if self.state == 1:
+            print("locked")
+            if self.init == 1:
+                delta = self.target - self.wnum
+                delta *= 50
+                self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - delta)
+                self.init = 0
+            else:
+            # Simple proportional control
+                delta = self.target - self.wnum
+                u = self.p * delta * 50
+                self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
+
     
     def update(self):
         try:
@@ -128,7 +109,9 @@ class LaserControl(ControlLoop):
 
     def lock(self, value):
         self.state = 1
+        print(f"lock function called with state being {self.state}")
         self.target = value
+        self.init = 1
         self.xDat = np.array([])
         self.yDat = np.array([])
 
@@ -139,7 +122,7 @@ class LaserControl(ControlLoop):
         self.yDat = np.array([])
 
     def lock_etalon(self):
-            self.laser.lock_etalon()
+        self.laser.lock_etalon()
 
     def unlock_etalon(self):
         self.laser.unlock_etalon()
@@ -158,13 +141,28 @@ class LaserControl(ControlLoop):
 
     def start_scan(self, start, end, no_scans, time_per_scan):
         self.scan_targets = np.linspace(start, end, no_scans)
-        self.time_ps = time_per_scan * 1000
-        self.target = self.scan_targets[0]
+        self.time_ps = time_per_scan
+        self.scan_time = time_per_scan
         self.state = 1
         self.scan = 1
-        self.do_time = 0
-        self.scan_time = 0
         self.j = 0
+    
+    def _do_scan(self):
+        try:
+            if self.scan_time == self.time_ps:
+                self.target = self.scan_targets[self.j]
+                delta = self.target - self.wnum
+                delta *= 50
+                self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - delta)
+                #initialize, and one step forward
+                self.scam_time = 0
+                self.j += 1
+            else:
+                self.scan_time += self.rate*0.001
+
+        except IndexError:
+            self.scan = 0
+            self.state = 0
 
     def p__update(self, value):
         try:
