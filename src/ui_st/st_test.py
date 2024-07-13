@@ -31,6 +31,8 @@ tag = f"wavenumber_{i.split(" ")[1]}"
 control_loop = False
 state = st.session_state
 
+if "laser_state" not in state:
+    state.laser_state = 0
  
 def error_page(description, error):
     st.error(description, icon="🚨")
@@ -41,20 +43,14 @@ def error_page(description, error):
     if rerun:
         st.rerun()
 
-def ins_laser(laser_tag):
-    return LaserControl("192.168.1.222", 39933, f"LaserLab:{laser_tag}")
-
 def patient_netconnect(tryouts = 10):
     if "netcon_tries" not in state:
         state.netcon_tries = 0
     global control_loop
     while state.netcon_tries <= tryouts:
         try:
-            if "control_loop" not in state:
-                control_loop = ins_laser(tag)
-            else:
-                control_loop = state.control_loop
-            # print("class instantiated again")
+            control_loop = LaserControl("192.168.1.222", 39933, f"LaserLab:{tag}")
+            print("class instantiated again")
             break
         except Exception as e:
             state.netcon_tries += 1
@@ -63,6 +59,7 @@ def patient_netconnect(tryouts = 10):
     if state.netcon_tries > tryouts:
         error_page(description=f"Unable to initialize the laser control after {tryouts} tries.", error=e)
         raise ConnectionError
+
 
 def main(): 
     #1/0
@@ -141,7 +138,7 @@ def main():
     cavity_lock.button(label=str(st.session_state["cavity_lock"]), on_click=lock_cavity, key="cavity_lock_button")   
 
     etalon_tuner.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=round(float(control_loop.etalon_tuner_value),5), format="%0.5f", disabled=etalon_lock_status)
-    cavity_tuner.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.reference_cavity_tuner_value),5), format="%0.5f")
+    cavity_tuner.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.reference_cavity_tuner_value),5), format="%0.5f", disabled=cavity_lock_status)
 
 
     # Wavelength Locker and PID
@@ -156,7 +153,8 @@ def main():
     def freq_lock():
         if control_loop.reference_cavity_lock_status == "on" and control_loop.etalon_lock_status == "on":
             #print("st locked")
-            control_loop.lock(state.t_wnum)
+            control_loop.lock(t_wnum)
+            state.laser_state = 1
             state["freq_lock_clicked"] = True
             state["start_wnum"] = t_wnum
             st.toast("✅ Wavelength locked!")
@@ -178,53 +176,16 @@ def main():
                                 format="%0.5f",
                                 key="t_wnum",                                                                         
                                 )
-        freq_lock_button = a2.form_submit_button(r"Lock", on_click=freq_lock)
+        freq_lock_button = a2.form_submit_button(r"Lock", disabled=state.freq_lock_clicked, on_click=freq_lock)
 
-    unlock1, unlock2 = tab1.columns([2.7,1], vertical_alignment="bottom")
-    unlock1.empty()
-    if not state.freq_lock_clicked:
-        unlock1.markdown(":red[_Wavelength Not Locked_]")
-    if state.freq_lock_clicked:
-        unlock1.markdown(":red[_Wavelength Lock in Progress_]")
-        
-    freq_unlock_button = unlock2.button(r"Unlock", disabled=not state.freq_lock_clicked, on_click=freq_unlock)
+    freq_unlock_button = tab1.button(r"Unlock", disabled=not state.freq_lock_clicked, on_click=freq_unlock)
 
     #PID Control
-    if "kp_enable" not in state:
-        state.kp_enable = False
-    if "ki_enable" not in state:
-        state.ki_enable = True
-    if "kd_enable" not in state:
-        state.kd_enable = True
-    word1, word2 = tab1.columns([3,1], vertical_alignment="bottom")
-    word1.subheader("PID Control")
+    tab1.subheader("PID Control")
     def p_update():
-        control_loop.p_update(state.kp)
+        control_loop.p_update(st.session_state.p)
     with tab1.form("PID Control", border=False):
-        pid1, pid2 = st.columns([3,1], vertical_alignment="bottom") 
-        pid1.write("")
-        pid2.write("Enable")
-        #pid11, pid12 = st.columns([3,1], vertical_alignment="center") 
-        kp = pid1.slider("Proportional Gain", min_value=0., max_value=50., value=4.50, step=0.1, format="%0.2f", key="kp")
-        # kp_enable = pid12.toggle("p", label_visibility="collapsed", value=not state.kp_enable)
-        # if kp_enable:
-        #     state.kp_enable = False
-        # if not kp_enable:
-        #     state.kp_enable = True
-        # pid21, pid22 = st.columns([3,1], vertical_alignment="center") 
-        # ki = pid21.slider("Integral Gain", min_value=0., max_value=10., value=0., step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
-        # ki_enable = pid22.toggle("i", label_visibility="collapsed")
-        # if ki_enable:
-        #     state.ki_enable = False
-        # if not ki_enable:
-        #     state.ki_enable = True
-        # pid31, pid32 = st.columns([3,1], vertical_alignment="center") 
-        # kd = pid31.slider("Derivative Gain", min_value=0., max_value=10., value=0., step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
-        # kd_enable = pid32.toggle("d", label_visibility="collapsed")
-        # if kd_enable:
-        #     state.kd_enable = False
-        # if not kd_enable:
-        #     state.kd_enable = True
+        p = st.slider("Proportional Gain", min_value=0., max_value=10., value=4.50, step=0.1, format="%0.2f", key="p")
         st.form_submit_button("Update", on_click=p_update)
 
 ##################################################################################
@@ -233,7 +194,7 @@ def main():
     tab2.header("Scan Settings")
     def start_scan():
         if not state.freq_lock_clicked:
-            control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan)
+            control_loop.start_scan(start_wnum, end_wnum, no_of_steps, time_per_scan)
             st.toast("👀 Scan started!")
         if state.freq_lock_clicked:
             st.toast("👿 Unlock the wavelength first before starting a scan!")
@@ -243,9 +204,9 @@ def main():
     if "end_wnum" not in st.session_state:
         state["end_wnum"] = round(float(control_loop.wavenumber.get()), 5)
 
-
-    def scan_settings():
+    with tab2.form("scan_settings", border=False):
         c1, c2 = st.columns(2, vertical_alignment='bottom')
+
         start_wnum = c1.number_input("Start Wavenumber (cm^-1)", 
                                     value=state.start_wnum,
                                     step=0.00001, 
@@ -264,37 +225,8 @@ def main():
                                         value=2.0,
                                         step=0.1
                                         )
-        scan_range = end_wnum - start_wnum
-        wnum_per_scan = scan_range / no_of_steps
-        wnum_to_freq = 30
-        no_of_steps_display, time_per_scan_display = no_of_steps, time_per_scan
-        exscander = st.expander("Scan Info")
-        st.button("rerun")
-        st.write(start_wnum)
-        with exscander:
-            col1, col2 = st.columns(2)
-            conversion_checkbox = col1.checkbox("In Hertz? (Wavenumber in default)")
-            col2.markdown(":red[_Please review everything before scanning_]")
-            if conversion_checkbox: 
-                mode = "Frequency"
-                unit1 = "GHz"
-                unit2 = "MHz"
-                start_wnum_display, end_wnum_display, scan_range_display, wnum_per_scan = start_wnum * wnum_to_freq, end_wnum * wnum_to_freq, round(scan_range * wnum_to_freq * 1000, 7), round(wnum_per_scan * 1000, 7)
-            else:
-                mode = "Wavenumber"
-                unit1, unit2 = "/cm", "/cm"
-                start_wnum_display, end_wnum_display, scan_range_display, no_of_steps_display = start_wnum, end_wnum, scan_range, no_of_steps
-            st.markdown(f"Start Point({unit1}): :orange-background[{start_wnum_display}]")
-            st.markdown(f"End Point({unit1}): :orange-background[{end_wnum_display}]")
-            st.markdown(f"Total Scan Range({unit2}): :orange-background[{scan_range_display}]")
-            st.markdown(f"Number of Steps: :orange-background[{no_of_steps_display}]")
-            st.markdown(f"Time Per Scan(s): :orange-background[{time_per_scan_display}]")
-            st.markdown(f"{mode} Per Scan({unit2}): :orange-background[{wnum_per_scan}]")
+        scan_button = st.form_submit_button("Start Scan", on_click=start_scan)
 
-    with tab2:
-        scan_settings()
-    # with tab2.form("scan_settings", border=False):
-    #     scan_button = st.form_submit_button("Start Scan", on_click=start_scan)
 ################################################################################
     #Main body
 
@@ -323,16 +255,13 @@ def main():
     if save_button:
         save_file(st.session_state.df_toSave)
         st.stop()
-    
-    loop(plot, dataf_space, reading_rate)
 
-def loop(plot, dataf_space, reading_rate):
+        
     while True:
         if "df_toSave" not in st.session_state:
             st.session_state.df_toSave = None
 
         try:
-            state.control_loop = control_loop
             control_loop.update()
         except Exception as e:
             error_page(description="Unable to update laser information.", error=e)
@@ -352,8 +281,8 @@ def loop(plot, dataf_space, reading_rate):
         reading_rate.metric(label="Reading Rate (ms)", value=control_loop.rate)
 
         sleep_time = control_loop.rate*0.001
-        time.sleep(sleep_time)
-    
+        time.sleep(1)
+        
 
 
 if __name__ == "__main__":

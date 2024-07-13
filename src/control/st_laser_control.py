@@ -5,6 +5,37 @@ from .base import ControlLoop
 import datetime
 import time
 
+class PIDController:
+    def __init__(self, kp, ki, kd, setpoint):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.setpoint = setpoint
+        self.integral = 0
+        self.previous_error = 0
+        self.previous_time = time.time()
+    
+    def p_update(self, current_value):
+        error = self.setpoint - current_value
+        output = self.kp * error
+
+        return output
+
+    def pid_update(self, current_value):
+        current_time = time.time()
+        delta_time = current_time - self.previous_time
+        error = self.setpoint - current_value
+
+        self.integral += error * delta_time
+        derivative = (error - self.previous_error) / delta_time
+
+        output = (self.kp * error) + (self.ki * self.integral) + (self.kd * derivative)
+
+        self.previous_error = error
+        self.previous_time = current_time
+
+        return output
+
 class LaserControl(ControlLoop):
     def __init__(self, ip_address, port, wavenumber_pv):
         self.laser = None
@@ -22,6 +53,7 @@ class LaserControl(ControlLoop):
         self.p = 4.5
         self.target = 0.0
         self.rate = 100.  #in milliseconds
+        self.conversion = 1
         self.now = datetime.datetime.now()
         #A list of commands to be sent to the laser 
         self.patient_setup_status()
@@ -66,10 +98,21 @@ class LaserControl(ControlLoop):
                     raise ConnectionRefusedError
                 else:
                     tries += 1
+    
+    def patient_update(self):
+        try:
+            self.reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
+            self.etalon_lock_status = self.laser.get_etalon_lock_status()
+            self.etalon_tuner_value = self.laser.get_full_web_status()['etalon_tune']
+            self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
+        except Exception as e:
+            print(f"Unable to acquire laser information. Error: {e}")
+            raise ConnectionRefusedError
 
     def _update(self):
-        print(self.state)
+        #print(self.state)
         self.wnum = round(float(self.wavenumber.get()), 5)
+        self.patient_update()
 
         if len(self.xDat) == 60:
             self.xDat = np.delete(self.xDat, 0)
@@ -90,14 +133,25 @@ class LaserControl(ControlLoop):
             print("locked")
             if self.init == 1:
                 delta = self.target - self.wnum
-                delta *= 50
+                delta *= 100
                 self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - delta)
                 self.init = 0
+                print("wavelength set")
             else:
             # Simple proportional control
                 delta = self.target - self.wnum
-                u = self.p * delta * 50
+                u = self.p * delta * self.conversion
                 self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
+                print("wavelength in control")
+                print(f"target:{self.target}")
+                print(f"current:{self.wnum}")
+                print(f"correction:{u}")
+            # delta = self.target - self.wnum
+            # u = self.p * delta
+            # print(self.target)
+            # print(self.wnum)
+            # print(u)
+            # self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
 
     
     def update(self):
@@ -152,7 +206,7 @@ class LaserControl(ControlLoop):
             if self.scan_time == self.time_ps:
                 self.target = self.scan_targets[self.j]
                 delta = self.target - self.wnum
-                delta *= 50
+                delta *= self.conversion
                 self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - delta)
                 #initialize, and one step forward
                 self.scam_time = 0
@@ -164,7 +218,7 @@ class LaserControl(ControlLoop):
             self.scan = 0
             self.state = 0
 
-    def p__update(self, value):
+    def p_update(self, value):
         try:
             self.p = float(value)
         except ValueError:
