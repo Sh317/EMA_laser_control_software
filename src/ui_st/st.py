@@ -16,21 +16,24 @@ from control.st_laser_control import LaserControl
 cf.set_config_file(world_readable=True,theme='white')
 cf.go_offline()
 
-def main():
-    st.set_page_config(
-        page_title="Laser Control System",
-        page_icon=":mirror:",
-        layout="wide",
-    )
 
-    st.header("Laser Control System")
+st.set_page_config(
+    page_title="Laser Control System",
+    page_icon=":mirror:",
+    layout="wide",
+)
 
-    sidebar = st.sidebar
-    # select which laser to control
-    i = sidebar.selectbox("Select Laser", ["Laser 1", "Laser 2", "Laser 3", "Laser 4"], index=0)
+st.header("Laser Control System")
+
+sidebar = st.sidebar
+# select which laser to control
+i = sidebar.selectbox("Select Laser", ["Laser 1", "Laser 2", "Laser 3", "Laser 4"], index=0)
 tag = f"wavenumber_{i.split(" ")[1]}"
 control_loop = False
 state = st.session_state
+def initialize_state(key, default_value):
+    if key not in st.session_state:
+        state[key] = default_value
 
  
 def error_page(description, error):
@@ -83,8 +86,7 @@ def main():
     l1, l2, l3 = tab1.columns([1, 1, 3], vertical_alignment="center")
 
 
-
-
+    
     #locks
     l1.write("**Etalon**")
     etalon_lock = l2.empty()
@@ -159,7 +161,7 @@ def main():
             #print("st locked")
             control_loop.lock(state.t_wnum)
             state["freq_lock_clicked"] = True
-            state["start_wnum"] = t_wnum
+            state["centroid_wnum_default"] = state.t_wnum
             st.toast("✅ Wavelength locked!")
         else:
             control_loop.unlock()
@@ -191,49 +193,50 @@ def main():
     freq_unlock_button = unlock2.button(r"Unlock", disabled=not state.freq_lock_clicked, on_click=freq_unlock)
 
     #PID Control
-    if "kp_enable" not in state:
-        state.kp_enable = False
-    if "ki_enable" not in state:
-        state.ki_enable = True
-    if "kd_enable" not in state:
-        state.kd_enable = True
+    initialize_state('kp_enable', False)
+    initialize_state('ki_enable', True)
+    initialize_state('kd_enable', True)
+
+    def pid_update():
+        control_loop.p_update(1. if state.kp_enable else state.kp)
+        control_loop.i_update(0. if state.ki_enable else state.ki)
+        control_loop.d_update(0. if state.kd_enable else state.kd)
+
     word1, word2 = tab1.columns([3,1], vertical_alignment="bottom")
     word1.subheader("PID Control")
-    def pid_update():
-        control_loop.p_update(state.kp)
-        control_loop.i_update(state.ki)
-        control_loop.d_update(state.kd)
+    word1.write("")
+    word2.write("Enable")
 
-    with tab1.form("PID Control", border=False):
-        pid1, pid2 = st.columns([3,1], vertical_alignment="bottom") 
-        pid1.write("")
-        pid2.write("Enable")
-        pid11, pid12 = st.columns([3,1], vertical_alignment="center") 
-        kp = pid11.slider("Proportional Gain", min_value=0., max_value=50., value=4.50, step=0.1, format="%0.2f", key="kp")
-        kp_enable = pid12.toggle("p", label_visibility="collapsed", value=not state.kp_enable)
+    pid1, pid2 = tab1.columns([3,1], vertical_alignment="top")
+    with pid2:
+        st.write('<div style="height: 28px;">\n</div>', unsafe_allow_html=True)
+        kp_enable = st.toggle("p", label_visibility="collapsed", value=not state.kp_enable)
         if kp_enable:
             state.kp_enable = False
-            state.kp = 0
+            control_loop.p_update(1)
         if not kp_enable:
             state.kp_enable = True
-
-        pid21, pid22 = st.columns([3,1], vertical_alignment="center") 
-        ki = pid21.slider("Integral Gain", min_value=0., max_value=10., value=0., step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
-        ki_enable = pid22.toggle("i", label_visibility="collapsed")
+        st.write('<div style="height: 36px;">\n</div>', unsafe_allow_html=True)
+        ki_enable = st.toggle("i", label_visibility="collapsed")
         if ki_enable:
             state.ki_enable = False
-            state.ki = 0
+            control_loop.i_update(0)
         if not ki_enable:
             state.ki_enable = True
-
-        pid31, pid32 = st.columns([3,1], vertical_alignment="center") 
-        kd = pid31.slider("Derivative Gain", min_value=0., max_value=10., value=0., step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
-        kd_enable = pid32.toggle("d", label_visibility="collapsed")
+        st.write('<div style="height: 38px;">\n</div>', unsafe_allow_html=True)
+        kd_enable = st.toggle("d", label_visibility="collapsed")
         if kd_enable:
             state.kd_enable = False
-            state.kd = 0
+            control_loop.d_update(0)
         if not kd_enable:
             state.kd_enable = True
+    
+    with pid1.form("PID Control", border=False):
+        kp = st.slider("Proportional Gain", min_value=0., max_value=50., value=50., step=0.1, format="%0.2f", key="kp")
+
+        ki = st.slider("Integral Gain", min_value=0., max_value=10., value=0., step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
+
+        kd = st.slider("Derivative Gain", min_value=0., max_value=10., value=0., step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
 
         st.form_submit_button("Update", on_click=pid_update)
 
@@ -247,23 +250,23 @@ def main():
             st.toast("👀 Scan started!")
         if state.freq_lock_clicked:
             st.toast("👿 Unlock the wavelength first before starting a scan!")
+    
+    def stop_scan():
+        control_loop.stop_scan()
+        st.toast("👀 Scan stopped!")
 
-    if "start_wnum" not in state:
-        state["start_wnum"] = round(float(control_loop.wavenumber.get()), 5)
-    if "end_wnum" not in st.session_state:
-        state["end_wnum"] = round(float(control_loop.wavenumber.get()), 5)
-
+    initialize_state('centroid_wnum_default', round(float(control_loop.wavenumber.get()), 5))
 
     def scan_settings():
         c1, c2 = st.columns(2, vertical_alignment='bottom')
         start_wnum = c1.number_input("Start Wavenumber (cm^-1)", 
-                                    value=state.start_wnum,
+                                    value=state.centroid_wnum_default,
                                     step=0.00001, 
                                     format="%0.5f",
                                     key="start_wnum"
                                     )
         end_wnum = c2.number_input("End Wavenumber (cm^-1)", 
-                                    value=state.end_wnum,
+                                    value=state.centroid_wnum_default,
                                     step=0.00001, 
                                     format="%0.5f",
                                     key="end_wnum"
@@ -275,7 +278,7 @@ def main():
                                     )
         time_per_scan = c2.number_input("Time per scan (sec)", 
                                         value=2.0,
-                                        step=0.1,
+                                        step=1.,
                                         key="time_per_scan"
                                         )
         scan_range = end_wnum - start_wnum
@@ -283,17 +286,15 @@ def main():
         wnum_to_freq = 30
         no_of_steps_display, time_per_scan_display = no_of_steps, time_per_scan
         exscander = st.expander("Scan Info")
-        st.button("rerun")
-        st.write(start_wnum)
         with exscander:
             col1, col2 = st.columns(2)
-            conversion_checkbox = col1.checkbox("In Hertz? (Wavenumber in default)")
+            conversion_checkbox = col1.checkbox("In Hertz? (Wavenumber in default)", value=True)
             col2.markdown(":red[_Please review everything before scanning_]")
             if conversion_checkbox: 
                 mode = "Frequency"
                 unit1 = "GHz"
                 unit2 = "MHz"
-                start_wnum_display, end_wnum_display, scan_range_display, wnum_per_scan = start_wnum * wnum_to_freq, end_wnum * wnum_to_freq, round(scan_range * wnum_to_freq * 1000, 7), round(wnum_per_scan * 1000, 7)
+                start_wnum_display, end_wnum_display, scan_range_display, wnum_per_scan = start_wnum * wnum_to_freq, end_wnum * wnum_to_freq, round(scan_range * wnum_to_freq * 1000, 7), round(wnum_per_scan * wnum_to_freq *1000, 7)
             else:
                 mode = "Wavenumber"
                 unit1, unit2 = "/cm", "/cm"
@@ -307,7 +308,9 @@ def main():
 
     with tab2:
         scan_settings()
-        scan_button = st.button("Start Scan", on_click=start_scan)
+        button1, button2 = st.columns(2)
+        scan_button = button1.button("Start Scan", on_click=start_scan)
+        scan_stop = button2.button("Stop Scan",on_click=stop_scan)
     # with tab2.form("scan_settings", border=False):
 ################################################################################
     #Main body

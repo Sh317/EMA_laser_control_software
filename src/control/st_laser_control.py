@@ -47,7 +47,7 @@ class LaserControl(ControlLoop):
         self.p = 4.5
         self.target = 0.0
         self.rate = 100.  #in milliseconds
-        self.conversion = 100
+        self.conversion = 80
         self.now = datetime.datetime.now()
         self.pid = PIDController(kp=4.5, ki=0., kd=0., setpoint=self.target)######
         #A list of commands to be sent to the laser 
@@ -137,13 +137,14 @@ class LaserControl(ControlLoop):
                 # Simple proportional control
                 # delta = self.target - self.wnum
                 # u = self.p * delta
+                self.pid.setpoint = self.target
                 u = self.pid.update(self.wnum)
                 self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
-                
-                print("wavelength in control")
                 print(f"target:{self.target}")
                 print(f"current:{self.wnum}")
                 print(f"correction:{u}")
+                # print("wavelength in control")
+                
             # self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
 
     
@@ -194,16 +195,21 @@ class LaserControl(ControlLoop):
         self.scan = 1
         self.j = 0
     
+    def stop_scan(self):
+        self.scan = 0
+        self.state = 0
+    
     def _do_scan(self):
         try:
-            if self.scan_time == self.time_ps:
+            if self.scan_time >= self.time_ps:
                 self.target = self.scan_targets[self.j]
                 self.init = 1
                 #initialize, and one step forward
-                self.scam_time = 0
+                self.scan_time = 0
                 self.j += 1
             else:
                 self.scan_time += self.rate*0.001
+                print(self.scan_time)
                 #to convert rate to seconds
 
         except IndexError:
