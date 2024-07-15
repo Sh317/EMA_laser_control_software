@@ -16,17 +16,18 @@ from control.st_laser_control import LaserControl
 cf.set_config_file(world_readable=True,theme='white')
 cf.go_offline()
 
-st.set_page_config(
-    page_title="Laser Control System",
-    page_icon=":mirror:",
-    layout="wide",
-)
+def main():
+    st.set_page_config(
+        page_title="Laser Control System",
+        page_icon=":mirror:",
+        layout="wide",
+    )
 
-st.header("Laser Control System")
+    st.header("Laser Control System")
 
-sidebar = st.sidebar
-# select which laser to control
-i = sidebar.selectbox("Select Laser", ["Laser 1", "Laser 2", "Laser 3", "Laser 4"], index=0)
+    sidebar = st.sidebar
+    # select which laser to control
+    i = sidebar.selectbox("Select Laser", ["Laser 1", "Laser 2", "Laser 3", "Laser 4"], index=0)
 tag = f"wavenumber_{i.split(" ")[1]}"
 control_loop = False
 state = st.session_state
@@ -198,34 +199,43 @@ def main():
         state.kd_enable = True
     word1, word2 = tab1.columns([3,1], vertical_alignment="bottom")
     word1.subheader("PID Control")
-    def p_update():
+    def pid_update():
         control_loop.p_update(state.kp)
+        control_loop.i_update(state.ki)
+        control_loop.d_update(state.kd)
+
     with tab1.form("PID Control", border=False):
         pid1, pid2 = st.columns([3,1], vertical_alignment="bottom") 
         pid1.write("")
         pid2.write("Enable")
-        #pid11, pid12 = st.columns([3,1], vertical_alignment="center") 
-        kp = pid1.slider("Proportional Gain", min_value=0., max_value=50., value=4.50, step=0.1, format="%0.2f", key="kp")
-        # kp_enable = pid12.toggle("p", label_visibility="collapsed", value=not state.kp_enable)
-        # if kp_enable:
-        #     state.kp_enable = False
-        # if not kp_enable:
-        #     state.kp_enable = True
-        # pid21, pid22 = st.columns([3,1], vertical_alignment="center") 
-        # ki = pid21.slider("Integral Gain", min_value=0., max_value=10., value=0., step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
-        # ki_enable = pid22.toggle("i", label_visibility="collapsed")
-        # if ki_enable:
-        #     state.ki_enable = False
-        # if not ki_enable:
-        #     state.ki_enable = True
-        # pid31, pid32 = st.columns([3,1], vertical_alignment="center") 
-        # kd = pid31.slider("Derivative Gain", min_value=0., max_value=10., value=0., step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
-        # kd_enable = pid32.toggle("d", label_visibility="collapsed")
-        # if kd_enable:
-        #     state.kd_enable = False
-        # if not kd_enable:
-        #     state.kd_enable = True
-        st.form_submit_button("Update", on_click=p_update)
+        pid11, pid12 = st.columns([3,1], vertical_alignment="center") 
+        kp = pid11.slider("Proportional Gain", min_value=0., max_value=50., value=4.50, step=0.1, format="%0.2f", key="kp")
+        kp_enable = pid12.toggle("p", label_visibility="collapsed", value=not state.kp_enable)
+        if kp_enable:
+            state.kp_enable = False
+            state.kp = 0
+        if not kp_enable:
+            state.kp_enable = True
+
+        pid21, pid22 = st.columns([3,1], vertical_alignment="center") 
+        ki = pid21.slider("Integral Gain", min_value=0., max_value=10., value=0., step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
+        ki_enable = pid22.toggle("i", label_visibility="collapsed")
+        if ki_enable:
+            state.ki_enable = False
+            state.ki = 0
+        if not ki_enable:
+            state.ki_enable = True
+
+        pid31, pid32 = st.columns([3,1], vertical_alignment="center") 
+        kd = pid31.slider("Derivative Gain", min_value=0., max_value=10., value=0., step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
+        kd_enable = pid32.toggle("d", label_visibility="collapsed")
+        if kd_enable:
+            state.kd_enable = False
+            state.kd = 0
+        if not kd_enable:
+            state.kd_enable = True
+
+        st.form_submit_button("Update", on_click=pid_update)
 
 ##################################################################################
 
@@ -249,20 +259,24 @@ def main():
         start_wnum = c1.number_input("Start Wavenumber (cm^-1)", 
                                     value=state.start_wnum,
                                     step=0.00001, 
-                                    format="%0.5f"
+                                    format="%0.5f",
+                                    key="start_wnum"
                                     )
         end_wnum = c2.number_input("End Wavenumber (cm^-1)", 
                                     value=state.end_wnum,
                                     step=0.00001, 
-                                    format="%0.5f"
+                                    format="%0.5f",
+                                    key="end_wnum"
                                     )
         no_of_steps = c1.number_input("No. of Steps", 
                                     value=5,
-                                    max_value=500
+                                    max_value=500,
+                                    key="no_of_steps"
                                     )
         time_per_scan = c2.number_input("Time per scan (sec)", 
                                         value=2.0,
-                                        step=0.1
+                                        step=0.1,
+                                        key="time_per_scan"
                                         )
         scan_range = end_wnum - start_wnum
         wnum_per_scan = scan_range / no_of_steps
@@ -293,8 +307,8 @@ def main():
 
     with tab2:
         scan_settings()
+        scan_button = st.button("Start Scan", on_click=start_scan)
     # with tab2.form("scan_settings", border=False):
-    #     scan_button = st.form_submit_button("Start Scan", on_click=start_scan)
 ################################################################################
     #Main body
 

@@ -14,14 +14,8 @@ class PIDController:
         self.integral = 0
         self.previous_error = 0
         self.previous_time = time.time()
-    
-    def p_update(self, current_value):
-        error = self.setpoint - current_value
-        output = self.kp * error
 
-        return output
-
-    def pid_update(self, current_value):
+    def update(self, current_value):
         current_time = time.time()
         delta_time = current_time - self.previous_time
         error = self.setpoint - current_value
@@ -53,8 +47,9 @@ class LaserControl(ControlLoop):
         self.p = 4.5
         self.target = 0.0
         self.rate = 100.  #in milliseconds
-        self.conversion = 1
+        self.conversion = 100
         self.now = datetime.datetime.now()
+        self.pid = PIDController(kp=4.5, ki=0., kd=0., setpoint=self.target)######
         #A list of commands to be sent to the laser 
         self.patient_setup_status()
 
@@ -131,26 +126,24 @@ class LaserControl(ControlLoop):
 
         if self.state == 1:
             print("locked")
+            #set the wavelength to the target
             if self.init == 1:
                 delta = self.target - self.wnum
-                delta *= 100
+                delta *= self.conversion
                 self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - delta)
                 self.init = 0
                 print("wavelength set")
             else:
-            # Simple proportional control
-                delta = self.target - self.wnum
-                u = self.p * delta * self.conversion
+                # Simple proportional control
+                # delta = self.target - self.wnum
+                # u = self.p * delta
+                u = self.pid.update(self.wnum)
                 self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
+                
                 print("wavelength in control")
                 print(f"target:{self.target}")
                 print(f"current:{self.wnum}")
                 print(f"correction:{u}")
-            # delta = self.target - self.wnum
-            # u = self.p * delta
-            # print(self.target)
-            # print(self.wnum)
-            # print(u)
             # self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
 
     
@@ -205,14 +198,13 @@ class LaserControl(ControlLoop):
         try:
             if self.scan_time == self.time_ps:
                 self.target = self.scan_targets[self.j]
-                delta = self.target - self.wnum
-                delta *= self.conversion
-                self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - delta)
+                self.init = 1
                 #initialize, and one step forward
                 self.scam_time = 0
                 self.j += 1
             else:
                 self.scan_time += self.rate*0.001
+                #to convert rate to seconds
 
         except IndexError:
             self.scan = 0
@@ -220,9 +212,21 @@ class LaserControl(ControlLoop):
 
     def p_update(self, value):
         try:
-            self.p = float(value)
+            self.pid.kp = float(value)
         except ValueError:
-            self.p = 0
+            self.pid.kp = 0
+
+    def i_update(self, value):
+        try:
+            self.pid.ki = float(value)
+        except ValueError:
+            self.pid.ki = 0
+    
+    def d_update(self, value):
+        try:
+            self.pid.kd = float(value)
+        except ValueError:
+            self.pid.kd = 0
 
     def time_converter(self, value):
         return datetime.timedelta(milliseconds = value)
