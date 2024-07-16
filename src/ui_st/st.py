@@ -244,15 +244,19 @@ def main():
 
     #tab2 - Scan Setttings
     tab2.header("Scan Settings")
+
+    initialize_state("scan_button", False)
     def start_scan():
         if not state.freq_lock_clicked:
             control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan)
+            state.scan_button = True
             st.toast("👀 Scan started!")
         if state.freq_lock_clicked:
             st.toast("👿 Unlock the wavelength first before starting a scan!")
     
     def stop_scan():
         control_loop.stop_scan()
+        state.scan_button = False
         st.toast("👀 Scan stopped!")
 
     initialize_state('centroid_wnum_default', round(float(control_loop.wavenumber.get()), 5))
@@ -276,7 +280,7 @@ def main():
                                     max_value=500,
                                     key="no_of_steps"
                                     )
-        time_per_scan = c2.number_input("Time per scan (sec)", 
+        time_per_scan = c2.number_input("Time per Step (sec)", 
                                         value=2.0,
                                         step=1.,
                                         key="time_per_scan"
@@ -309,19 +313,20 @@ def main():
     with tab2:
         scan_settings()
         button1, button2 = st.columns(2)
-        scan_button = button1.button("Start Scan", on_click=start_scan)
-        scan_stop = button2.button("Stop Scan",on_click=stop_scan)
+        scan_button = button1.button("Start Scan", on_click=start_scan, value=state.scan_button)
+        scan_stop = button2.button("Stop Scan",on_click=stop_scan, type="primary", value=not state.scan_button)
     # with tab2.form("scan_settings", border=False):
 ################################################################################
     #Main body
 
     #Plotting
     plot = st.empty()
-    place1, place2, place3 = st.columns(3, vertical_alignment="center")
+    place1, place2, place3, place4, place5 = st.columns([4, 3, 1, 1, 1], vertical_alignment="center")
     dataf_space = place1.empty()
     reading_rate = place2.empty()
     save_button = place3.button("Save")
-
+    clear_button = place4.button("Clear Plot", key="PLot")
+    rerun = place5.button("Rerun", key="main_rerun")
 
     @st.experimental_dialog("Save As")
     def save_file(data):
@@ -336,10 +341,20 @@ def main():
             except Exception as e:
                 st.error(f"**Failed to save file due to an error:** {e}")
     
+    def clear_plot():
+        control_loop.clear_dataset()
 
+    def clear_data():
+        control_loop.clear_dataset()
+
+    
+    if rerun:
+        st.rerun()
+    if clear_button:
+        clear_plot()
     if save_button:
         save_file(st.session_state.df_toSave)
-        st.stop()
+        clear_data()
     
     loop(plot, dataf_space, reading_rate)
 

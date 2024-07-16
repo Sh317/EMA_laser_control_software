@@ -47,7 +47,7 @@ class LaserControl(ControlLoop):
         self.p = 4.5
         self.target = 0.0
         self.rate = 100.  #in milliseconds
-        self.conversion = 80
+        self.conversion = 60
         self.now = datetime.datetime.now()
         self.pid = PIDController(kp=4.5, ki=0., kd=0., setpoint=self.target)######
         #A list of commands to be sent to the laser 
@@ -114,6 +114,7 @@ class LaserControl(ControlLoop):
             self.yDat = np.delete(self.yDat, 0)
         if len(self.xDat) == 0:
             self.xDat = np.array([0])
+        if len(self.xDat_with_time) == 0:
             self.xDat_with_time.append(self.now) 
         else:
             self.xDat = np.append(self.xDat, self.xDat[-1] + self.rate)    
@@ -140,20 +141,81 @@ class LaserControl(ControlLoop):
                 self.pid.setpoint = self.target
                 u = self.pid.update(self.wnum)
                 self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
-                print(f"target:{self.target}")
-                print(f"current:{self.wnum}")
-                print(f"correction:{u}")
+                # print(f"target:{self.target}")
+                # print(f"current:{self.wnum}")
+                # print(f"correction:{u}")
                 # print("wavelength in control")
-                
-            # self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
+            
+        if self.state == 2:
+        #get conversion constant mode
+            self.do_conversion()
 
-    
     def update(self):
         try:
             self._update()
         except Exception as e:
             print(f"Error in LaserControl._update: {e}")
             pass
+    
+    def get_conversion(self):
+        self.state = 2
+
+    def do_conversion(self):
+        list = np.linspace(10, 100, 10)
+        loop = 0
+        loopend = 5
+        delta = 0.001
+        closest = np.array([])
+        wnum = np.array([])
+        while loop < loopend:
+            output_deltas = np.array([])
+            for i in list:
+                input_wnum = round(float(self.wavenumber.get()), 5)
+                i = round(i,0)    
+                u = i * delta
+                self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)                
+                output_wnum = round(float(self.wavenumber.get()), 5)
+                output_delta = np.abs(output_wnum - input_wnum)
+                output_deltas = np.append(output_deltas, output_delta)
+                # print(i)
+                # print(output_delta)
+                time.sleep(0.1)
+            closest_index = np.abs(output_deltas - delta).argmin()
+            closest_number = list[closest_index]
+            closest = np.append(closest, closest_number)
+            wnum = np.append(wnum, output_deltas[closest_index])
+            print(f"best:{closest_number}")
+            print(f"length:{len(list)- len(output_deltas)}")
+            loop += 1
+            
+        print(f"wavelength:{wnum}")
+        print(closest)
+        self.state = 0
+    
+    def hack_reading_rate(self):
+        rates = np.linspace(150, 1, 150)
+        effective_rates = np.array([])
+        loop = 0
+        loop_end = 100
+        while loop < loop_end:
+            print(f"In {loop} loop now")
+            for rate in rates:
+                first = round(float(self.wavenumber.get()), 5)
+                time.sleep(rate*0.001)
+                second = round(float(self.wavenumber.get()), 5)
+                if first == second:
+                    effective_rates = np.append(effective_rates, rate)
+                    break
+                else: pass
+            loop += 1
+
+        unique, counts = np.unique(effective_rates, return_counts=True)
+        most_frequent_index = counts.argmax()
+        most_frequent_number = unique[most_frequent_index]
+        print(f"most frequent reading rate: {most_frequent_number} ms")
+        print(f"potential list: {unique}")
+
+
 
     def lock(self, value):
         self.state = 1
@@ -189,8 +251,8 @@ class LaserControl(ControlLoop):
 
     def start_scan(self, start, end, no_scans, time_per_scan):
         self.scan_targets = np.linspace(start, end, no_scans)
-        self.time_ps = time_per_scan
-        self.scan_time = time_per_scan
+        self.time_ps = round(time_per_scan, 5)
+        self.scan_time = round(time_per_scan, 5)
         self.state = 1
         self.scan = 1
         self.j = 0
@@ -208,7 +270,7 @@ class LaserControl(ControlLoop):
                 self.scan_time = 0
                 self.j += 1
             else:
-                self.scan_time += self.rate*0.001
+                self.scan_time += round(self.rate*0.001, 5)
                 print(self.scan_time)
                 #to convert rate to seconds
 
@@ -236,6 +298,15 @@ class LaserControl(ControlLoop):
 
     def time_converter(self, value):
         return datetime.timedelta(milliseconds = value)
+
+    def clear_plot(self):
+        self.xDat = np.array([])
+        self.yDat = np.array([])
+    
+    def clear_dataset(self):
+        self.xDat_with_time = []
+        self.yDat_with_time = np.array([])
+
     
     def stop(self):
         pass
