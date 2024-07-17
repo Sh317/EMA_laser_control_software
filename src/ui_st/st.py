@@ -7,15 +7,19 @@ import numpy as np
 import plotly
 import cufflinks as cf
 import pandas as pd
+from tkinter import Tk
+from tkinter.filedialog import askdirectory
 
 setattr(plotly.offline, "__PLOTLY_OFFLINE_INITIALIZED", True)
 sys.path.append('.\\src')
 from control.st_laser_control import LaserControl
 
-
+#Set the cufflinks to offline mode
 cf.set_config_file(world_readable=True,theme='white')
 cf.go_offline()
-
+# Hide the root Tkinter window
+root = Tk()
+root.withdraw()
 
 st.set_page_config(
     page_title="Laser Control System",
@@ -313,8 +317,8 @@ def main():
     with tab2:
         scan_settings()
         button1, button2 = st.columns(2)
-        scan_button = button1.button("Start Scan", on_click=start_scan, value=state.scan_button)
-        scan_stop = button2.button("Stop Scan",on_click=stop_scan, type="primary", value=not state.scan_button)
+        scan_button = button1.button("Start Scan", on_click=start_scan, disabled=state.scan_button)
+        scan_stop = button2.button("Stop Scan",on_click=stop_scan, type="primary", disabled=not state.scan_button)
     # with tab2.form("scan_settings", border=False):
 ################################################################################
     #Main body
@@ -326,27 +330,40 @@ def main():
     reading_rate = place2.empty()
     save_button = place3.button("Save")
     clear_button = place4.button("Clear Plot", key="PLot")
-    rerun = place5.button("Rerun", key="main_rerun")
+    rerun = place5.button("Rerun", type="primary", key="main_rerun")
 
-    @st.experimental_dialog("Save As")
-    def save_file(data):
-        filename = st.text_input("File Name:", placeholder="Enter the file name...")
-        filepath = st.text_input("Save to", placeholder="Enter the full path here...")
-        if st.button("Save", key="save"):
-            try:
-                name = f"{filename}.csv"
-                path = os.path.join(filepath, name)
-                data.to_csv(path, index=False, mode = "x")
-                st.success(f"File saved successfully to {path}")
-            except Exception as e:
-                st.error(f"**Failed to save file due to an error:** {e}")
-    
+
     def clear_plot():
-        control_loop.clear_dataset()
+        control_loop.clear_plot()
 
     def clear_data():
         control_loop.clear_dataset()
 
+    @st.experimental_dialog("Save As")
+    def save_file(data):
+        filename = st.text_input("File Name:", placeholder="Enter the file name...")
+        col1, col2 = st.columns([1, 4], vertical_alignment="bottom")
+        col1.write("Select a folder to save the file:")
+        if col1.button("Save to"):
+            folder_selected = askdirectory()
+            if folder_selected:
+                col2.write(f"Path: {folder_selected}")
+            else:
+                col2.write("No folder selected")
+
+        c1, c2 = st.columns(2)
+        if c1.button("Save", key="save"):
+            try:
+                name = f"{filename}.csv"
+                path = os.path.join(folder_selected, name)
+                data.to_csv(path, index=False, mode = "x")
+                st.success(f"File saved successfully to {path}")
+            except Exception as e:
+                st.error(f"**Failed to save file due to an error:** {e}")
+        
+        if c2.button("Keep Running", type="primary", key="clear_saved_data"):
+            clear_data()
+            st.rerun()
     
     if rerun:
         st.rerun()
@@ -354,14 +371,14 @@ def main():
         clear_plot()
     if save_button:
         save_file(st.session_state.df_toSave)
-        clear_data()
-    
+        st.stop()
+
     loop(plot, dataf_space, reading_rate)
+
 
 def loop(plot, dataf_space, reading_rate):
     while True:
-        if "df_toSave" not in st.session_state:
-            st.session_state.df_toSave = None
+        initialize_state("df_toSave", None)
 
         try:
             state.control_loop = control_loop

@@ -114,11 +114,14 @@ class LaserControl(ControlLoop):
             self.yDat = np.delete(self.yDat, 0)
         if len(self.xDat) == 0:
             self.xDat = np.array([0])
+        else:
+            self.xDat = np.append(self.xDat, self.xDat[-1] + self.rate)    
+
         if len(self.xDat_with_time) == 0:
             self.xDat_with_time.append(self.now) 
         else:
-            self.xDat = np.append(self.xDat, self.xDat[-1] + self.rate)    
             self.xDat_with_time.append(self.xDat_with_time[-1] + self.time_converter(self.rate))
+
         self.yDat = np.append(self.yDat, self.wnum)
         self.yDat_with_time = np.append(self.yDat_with_time, self.wnum)
 
