@@ -46,6 +46,7 @@ class LaserControl(ControlLoop):
         self.yDat_with_time = np.array([])
         self.p = 4.5
         self.target = 0.0
+        self.scan_progress = 0.
         self.rate = 100.  #in milliseconds
         self.conversion = 60
         self.now = datetime.datetime.now()
@@ -115,7 +116,7 @@ class LaserControl(ControlLoop):
         if len(self.xDat) == 0:
             self.xDat = np.array([0])
         else:
-            self.xDat = np.append(self.xDat, self.xDat[-1] + self.rate)    
+            self.xDat = np.append(self.xDat, self.xDat[-1] + self.rate*0.001)    
 
         if len(self.xDat_with_time) == 0:
             self.xDat_with_time.append(self.now) 
@@ -126,10 +127,10 @@ class LaserControl(ControlLoop):
         self.yDat_with_time = np.append(self.yDat_with_time, self.wnum)
 
         if self.scan == 1:
-            if self.j == self.
             self._do_scan()
 
         if self.state == 1:
+        #lock-in the wavelength of laser mode
             print("locked")
             #set the wavelength to the target
             if self.init == 1:
@@ -142,9 +143,7 @@ class LaserControl(ControlLoop):
                 # Simple proportional control
                 # delta = self.target - self.wnum
                 # u = self.p * delta
-                self.pid.setpoint = self.target
-                u = self.pid.update(self.wnum)
-                self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
+                self.pid_filtered_control(self.wnum, self.target)
                 # print(f"target:{self.target}")
                 # print(f"current:{self.wnum}")
                 # print(f"correction:{u}")
@@ -219,7 +218,18 @@ class LaserControl(ControlLoop):
         print(f"most frequent reading rate: {most_frequent_number} ms")
         print(f"potential list: {unique}")
 
+    def pid_control(self):
+        self.pid.setpoint = self.target
+        u = self.pid.update(self.wnum)
+        self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
 
+    def pid_filtered_control(self, current, target):
+        lower = target - 0.00002
+        upper = target + 0.00002
+        if current >= lower and current <= upper:
+            pass
+        else: 
+            self.pid_control()
 
     def lock(self, value):
         self.state = 1
@@ -265,9 +275,11 @@ class LaserControl(ControlLoop):
     def stop_scan(self):
         self.scan = 0
         self.state = 0
+        self.scan_progress = 0.
     
     def _do_scan(self):
         try:
+            self.scan_progress += 1
             if self.scan_time >= self.time_ps:
                 if self.j < self.jmax:
                     self.target = self.scan_targets[self.j]
@@ -275,12 +287,12 @@ class LaserControl(ControlLoop):
                     #initialize, and one step forward
                     self.scan_time = 0
                     self.j += 1
-                else: self.stop_scan()
+                else: 
+                    self.stop_scan()
             else:
                 self.scan_time += round(self.rate*0.001, 5)
                 print(self.scan_time)
                 #to convert rate to seconds
-
         except IndexError:
             self.scan = 0
             self.state = 0

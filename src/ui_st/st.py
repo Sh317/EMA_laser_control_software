@@ -7,8 +7,6 @@ import numpy as np
 import plotly
 import cufflinks as cf
 import pandas as pd
-from tkinter import Tk
-from tkinter.filedialog import askdirectory
 
 setattr(plotly.offline, "__PLOTLY_OFFLINE_INITIALIZED", True)
 sys.path.append('.\\src')
@@ -17,10 +15,6 @@ from control.st_laser_control import LaserControl
 # Set the cufflinks to offline mode
 cf.set_config_file(world_readable=True, theme='white')
 cf.go_offline()
-
-# Hide the root Tkinter window
-root = Tk()
-root.withdraw()
 
 # Streamlit page configuration
 st.set_page_config(
@@ -48,6 +42,10 @@ initialize_state("netcon_tries", 0)
 initialize_state("etalon_lock", "🔓")
 initialize_state("cavity_lock", "🔓")
 initialize_state("freq_lock_clicked", False)
+initialize_state('kp_enable', False)
+initialize_state('ki_enable', True)
+initialize_state('kd_enable', True)
+initialize_state("scan", 0)
 initialize_state("scan_button", False)
 initialize_state("df_toSave", None)
 initialize_state("max_points", 100)  # Limit to last 100 points for plotting
@@ -58,7 +56,7 @@ def error_page(description, error):
     with e1.expander("View Error Details"):
         st.write(f"Error: {str(error)} \n {traceback.format_exc()}")
     if e2.button("Try Again!", type="primary"):
-        st.experimental_rerun()
+        st.rerun()
 
 def ins_laser(laser_tag):
     return LaserControl("192.168.1.222", 39933, f"LaserLab:{laser_tag}")
@@ -75,7 +73,7 @@ def patient_netconnect(tryouts=10):
         except Exception as e:
             state.netcon_tries += 1
             st.error(f"Unable to initialize the laser control due to error: {e}")
-            st.experimental_rerun()
+            st.rerun()
     if state.netcon_tries > tryouts:
         error_page(f"Unable to initialize the laser control after {tryouts} tries.", e)
         raise ConnectionError
@@ -130,6 +128,7 @@ def start_scan():
     if not state.freq_lock_clicked:
         control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan)
         state.scan_button = True
+        state.scan = 1
         st.toast("👀 Scan started!")
     else:
         st.toast("👿 Unlock the wavelength first before starting a scan!")
@@ -148,24 +147,48 @@ def clear_plot():
 def clear_data():
     control_loop.clear_dataset()
 
+def get_rate():
+    return control_loop.rate*0.001
+
+@st.experimental_dialog("Save As")
 def save_file(data):
     filename = st.text_input("File Name:", placeholder="Enter the file name...")
-    folder_selected = askdirectory()
-    if folder_selected:
+    filepath = st.text_input("File path:", placeholder="Enter the full path...")
+    # col1, col2 = st.columns([1, 4], vertical_alignment="bottom")
+    # col1.write("Select a folder to save the file:")
+    # if col1.button("Save to"):
+    #     folder_selected = askdirectory()
+    #     if folder_selected:
+    #         col2.write(f"Path: {folder_selected}")
+    #     else:
+    #         col2.write("No folder selected")
+
+    c1, c2 = st.columns(2)
+    if c1.button("Save", key="save"):
         try:
             name = f"{filename}.csv"
-            path = os.path.join(folder_selected, name)
-            data.to_csv(path, index=False, mode="x")
+            path = os.path.join(filepath, name)
+            data.to_csv(path, index=False, mode = "x")
             st.success(f"File saved successfully to {path}")
         except Exception as e:
             st.error(f"**Failed to save file due to an error:** {e}")
+    
+    if c2.button("Keep Running", type="primary", key="clear_saved_data"):
+        clear_data()
+        st.rerun()
+
+@st.cache_data
+def calculate_total_points(time_ps, rate, no_steps):
+    total_points = round(time_ps / rate) * no_steps
+    return total_points
 
 def calculate_progress(progress, goal):
     percent = progress / goal
-    progress_text = f"{percent:.2%} of scan completed"
+    progress_text = f"{percent:.2%} % of scan have completed"
     return percent, progress_text
 
-def draw_progress_bar(point, total_points, progress_bar):
+def draw_progress_bar(total_points, progress_bar):
+    point = control_loop.scan_progress
     percent, progress_text = calculate_progress(point, total_points)
     progress_bar.progress(percent, text=progress_text)
 
@@ -178,12 +201,10 @@ def loop(plot, dataf_space, reading_rate):
 
     # Time series plot
     ts, wn, ts_with_time, wn_with_time = control_loop.xDat, control_loop.yDat, control_loop.xDat_with_time, control_loop.yDat_with_time
-    if ts and wn:
+    if len(ts) > 0 and len(wn) > 0:
         # Only use the last 'max_points' data points for plotting
         ts = ts[-state.max_points:]
         wn = wn[-state.max_points:]
-        ts_with_time = ts_with_time[-state.max_points:]
-        wn_with_time = wn_with_time[-state.max_points:]
 
         dataf = pd.DataFrame({"Wavenumber (cm^-1)": wn}, index=ts)
         fig = dataf.iplot(kind="scatter", title="Wavenumber VS Time", xTitle="Time(s)", yTitle="Wavenumber (cm^-1)", asFigure=True, mode="lines+markers", colors=["pink"])
@@ -197,34 +218,36 @@ def loop(plot, dataf_space, reading_rate):
     time.sleep(control_loop.rate * 0.001)
 
 def scan_settings():
+    initialize_state('centroid_wnum_default', round(float(control_loop.wavenumber.get()), 5))
     st.header("Scan Settings")
     c1, c2 = st.columns(2, vertical_alignment='bottom')
-    state.start_wnum = c1.number_input("Start Wavenumber (cm^-1)", value=state.centroid_wnum_default, step=0.00001, format="%0.5f", key="start_wnum")
-    state.end_wnum = c2.number_input("End Wavenumber (cm^-1)", value=state.centroid_wnum_default, step=0.00001, format="%0.5f", key="end_wnum")
-    state.no_of_steps = c1.number_input("No. of Steps", value=5, max_value=500, key="no_of_steps")
-    state.time_per_scan = c2.number_input("Time per Step (sec)", value=2.0, step=1., key="time_per_scan")
-    scan_range = state.end_wnum - state.start_wnum
-    wnum_per_scan = scan_range / state.no_of_steps
+    start_wnum = c1.number_input("Start Wavenumber (cm^-1)", value=state.centroid_wnum_default, step=0.00001, format="%0.5f", key="start_wnum")
+    end_wnum = c2.number_input("End Wavenumber (cm^-1)", value=state.centroid_wnum_default, step=0.00001, format="%0.5f", key="end_wnum")
+    no_of_steps = c1.number_input("No. of Steps", value=5, max_value=500, key="no_of_steps")
+    time_per_scan = c2.number_input("Time per Step (sec)", value=2.0, step=1., key="time_per_scan")
+    scan_range = end_wnum - start_wnum
+    wnum_per_scan = scan_range / no_of_steps
     wnum_to_freq = 30
+    no_of_steps_display, time_per_scan_display = no_of_steps, time_per_scan
     exscander = st.expander("Scan Info")
     with exscander:
         col1, col2 = st.columns(2)
         conversion_checkbox = col1.checkbox("In Hertz? (Wavenumber in default)", value=True)
         col2.markdown(":red[_Please review everything before scanning_]")
-        if conversion_checkbox:
+        if conversion_checkbox: 
             mode = "Frequency"
             unit1 = "GHz"
             unit2 = "MHz"
-            start_wnum_display, end_wnum_display, scan_range_display, wnum_per_scan = state.start_wnum * wnum_to_freq, state.end_wnum * wnum_to_freq, round(scan_range * wnum_to_freq * 1000, 7), round(wnum_per_scan * wnum_to_freq *1000, 7)
+            start_wnum_display, end_wnum_display, scan_range_display, wnum_per_scan = start_wnum * wnum_to_freq, end_wnum * wnum_to_freq, round(scan_range * wnum_to_freq * 1000, 7), round(wnum_per_scan * wnum_to_freq *1000, 7)
         else:
             mode = "Wavenumber"
             unit1, unit2 = "/cm", "/cm"
-            start_wnum_display, end_wnum_display, scan_range_display, no_of_steps_display = state.start_wnum, state.end_wnum, scan_range, state.no_of_steps
+            start_wnum_display, end_wnum_display, scan_range_display, no_of_steps_display = start_wnum, end_wnum, scan_range, no_of_steps
         st.markdown(f"Start Point({unit1}): :orange-background[{start_wnum_display}]")
         st.markdown(f"End Point({unit1}): :orange-background[{end_wnum_display}]")
         st.markdown(f"Total Scan Range({unit2}): :orange-background[{scan_range_display}]")
         st.markdown(f"Number of Steps: :orange-background[{no_of_steps_display}]")
-        st.markdown(f"Time Per Scan(s): :orange-background[{state.time_per_scan}]")
+        st.markdown(f"Time Per Scan(s): :orange-background[{time_per_scan_display}]")
         st.markdown(f"{mode} Per Scan({unit2}): :orange-background[{wnum_per_scan}]")
 
 def main():
@@ -245,9 +268,9 @@ def main():
         ll3.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.reference_cavity_tuner_value), 5), format="%0.5f")
 
         st.header("Wavelength Locker")
-        with st.form("Lock Wavenumber", clear_on_submit=True):
+        with st.form("Lock Wavenumber", clear_on_submit=True, border=False):
             a1, a2 = st.columns([2.7, 1], vertical_alignment="bottom")
-            state.t_wnum = a1.number_input("Target Wavenumber (cm^-1)", value=round(float(control_loop.wavenumber.get()), 5), step=0.00001, format="%0.5f", key="t_wnum")
+            t_wnum = a1.number_input("Target Wavenumber (cm^-1)", value=round(float(control_loop.wavenumber.get()), 5), step=0.00001, format="%0.5f", key="t_wnum")
             if a2.form_submit_button("Lock", on_click=freq_lock):
                 st.toast("Wavelength Locked!")
 
@@ -259,17 +282,22 @@ def main():
         word1, word2 = st.columns([3, 1], vertical_alignment="bottom")
         word2.write("Enable")
         pid1, pid2 = st.columns([3, 1], vertical_alignment="top")
-        kp_enable = pid2.checkbox("p", value=not state.kp_enable)
-        ki_enable = pid2.checkbox("i", value=not state.ki_enable)
-        kd_enable = pid2.checkbox("d", value=not state.kd_enable)
+        with pid2:
+            st.write('<div style="height: 26px;">\n</div>', unsafe_allow_html=True)
+            kp_enable = st.checkbox("p", value=not state.kp_enable)
+            st.write('<div style="height: 38px;">\n</div>', unsafe_allow_html=True)
+            ki_enable = st.checkbox("i", value=not state.ki_enable)
+            st.write('<div style="height: 38px;">\n</div>', unsafe_allow_html=True)
+            kd_enable = st.checkbox("d", value=not state.kd_enable)
 
         state.kp_enable = not kp_enable
         state.ki_enable = not ki_enable
         state.kd_enable = not kd_enable
-        with pid1.form("PID Control", clear_on_submit=True):
-            state.kp = st.slider("Proportional Gain", min_value=0.0, max_value=50.0, value=50.0, step=0.1, format="%0.2f", key="kp")
-            state.ki = st.slider("Integral Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
-            state.kd = st.slider("Derivative Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
+
+        with pid1.form("PID Control", clear_on_submit=True, border=False):
+            kp = st.slider("Proportional Gain", min_value=0.0, max_value=50.0, value=50.0, step=0.1, format="%0.2f", key="kp")
+            ki = st.slider("Integral Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
+            kd = st.slider("Derivative Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
             if st.form_submit_button("Update", on_click=pid_update):
                 st.toast("PID Control Updated!")
 
@@ -287,13 +315,19 @@ def main():
     reading_rate = place2.empty()
     if place3.button("Save"):
         save_file(state.df_toSave)
+        st.stop()
     if place4.button("Clear Plot"):
         clear_plot()
     if place5.button("Rerun", type="primary"):
-        st.experimental_rerun()
+        st.rerun()
 
     while True:
+        sleep_time = get_rate()
+        initialize_state("df_toSave", None)
         loop(plot, dataf_space, reading_rate)
+        if state.scan == 1:
+            total_points = calculate_total_points(state.time_per_scan, sleep_time, state.no_of_steps)
+            draw_progress_bar(total_points, scan_bar)
 
 if __name__ == "__main__":
     main()
