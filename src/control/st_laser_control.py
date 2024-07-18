@@ -126,6 +126,7 @@ class LaserControl(ControlLoop):
         self.yDat_with_time = np.append(self.yDat_with_time, self.wnum)
 
         if self.scan == 1:
+            if self.j == self.
             self._do_scan()
 
         if self.state == 1:
@@ -259,6 +260,7 @@ class LaserControl(ControlLoop):
         self.state = 1
         self.scan = 1
         self.j = 0
+        self.jmax = no_scans
     
     def stop_scan(self):
         self.scan = 0
@@ -267,11 +269,13 @@ class LaserControl(ControlLoop):
     def _do_scan(self):
         try:
             if self.scan_time >= self.time_ps:
-                self.target = self.scan_targets[self.j]
-                self.init = 1
-                #initialize, and one step forward
-                self.scan_time = 0
-                self.j += 1
+                if self.j < self.jmax:
+                    self.target = self.scan_targets[self.j]
+                    self.init = 1
+                    #initialize, and one step forward
+                    self.scan_time = 0
+                    self.j += 1
+                else: self.stop_scan()
             else:
                 self.scan_time += round(self.rate*0.001, 5)
                 print(self.scan_time)
@@ -281,6 +285,9 @@ class LaserControl(ControlLoop):
             self.scan = 0
             self.state = 0
 
+    def scan_update(self, new_time_ps):
+        self.time_ps = new_time_ps
+    
     def p_update(self, value):
         try:
             self.pid.kp = float(value)

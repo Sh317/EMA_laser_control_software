@@ -250,6 +250,10 @@ def main():
     tab2.header("Scan Settings")
 
     initialize_state("scan_button", False)
+    initialize_state('centroid_wnum_default', round(float(control_loop.wavenumber.get()), 5))
+
+
+
     def start_scan():
         if not state.freq_lock_clicked:
             control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan)
@@ -262,8 +266,9 @@ def main():
         control_loop.stop_scan()
         state.scan_button = False
         st.toast("👀 Scan stopped!")
-
-    initialize_state('centroid_wnum_default', round(float(control_loop.wavenumber.get()), 5))
+    
+    def scan_update():
+        control_loop.scan_update(state.time_per_scan)
 
     def scan_settings():
         c1, c2 = st.columns(2, vertical_alignment='bottom')
@@ -316,9 +321,12 @@ def main():
 
     with tab2:
         scan_settings()
-        button1, button2 = st.columns(2)
+        button1, button2, button3 = st.columns([1, 1, 3])
         scan_button = button1.button("Start Scan", on_click=start_scan, disabled=state.scan_button)
         scan_stop = button2.button("Stop Scan",on_click=stop_scan, type="primary", disabled=not state.scan_button)
+        scan_update = button3.button("Update Time per Step", on_click=scan_update, disabled=not state.scan_button)
+        scan_bar = st.progress(0, text="Scan Progress")
+
     # with tab2.form("scan_settings", border=False):
 ################################################################################
     #Main body
@@ -373,11 +381,28 @@ def main():
         save_file(st.session_state.df_toSave)
         st.stop()
 
-    loop(plot, dataf_space, reading_rate)
+    while True:
+        loop(plot, dataf_space, reading_rate)
 
+
+
+def calculate_progress(progress, goal):
+    percent = progress / goal
+    progress_text = f"{percent} % of scan have completed"
+    return percent, progress_text
+
+def calculate_total_points(time_ps, rate, no_steps)
+    total_points = round(time_ps / rate) * no_steps
+    return total_points
+    
+point += 1
+def draw_progress_bar(point, total_points, progress_bar):
+    percent, progress_text = calculate_progress(point, total_points)
+    progress_bar.progress(percent, text="progress_text")
+if state.scan == 1:
+    draw_progress_bar(point, total_points, progress_bar)
 
 def loop(plot, dataf_space, reading_rate):
-    while True:
         initialize_state("df_toSave", None)
 
         try:
