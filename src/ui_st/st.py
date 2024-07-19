@@ -38,15 +38,21 @@ def initialize_state(key, default_value):
     if key not in state:
         state[key] = default_value
 
+def initialize_lock(key, condition):
+    if key not in st.session_state:
+        if condition:
+            st.session_state[key] = "🔐"
+        else:
+            st.session_state[key] = "🔓"
+
 initialize_state("netcon_tries", 0)
-initialize_state("etalon_lock", "🔓")
-initialize_state("cavity_lock", "🔓")
 initialize_state("freq_lock_clicked", False)
 initialize_state('kp_enable', False)
 initialize_state('ki_enable', True)
 initialize_state('kd_enable', True)
 initialize_state("scan", 0)
 initialize_state("scan_button", False)
+initialize_state("scan_status", ":green[_Ready for Scan_]")
 initialize_state("df_toSave", None)
 initialize_state("max_points", 100)  # Limit to last 100 points for plotting
 
@@ -78,18 +84,18 @@ def patient_netconnect(tryouts=10):
         error_page(f"Unable to initialize the laser control after {tryouts} tries.", e)
         raise ConnectionError
 
-def etalon_lock_status():
+def get_etalon_lock_status():
     e_status = control_loop.etalon_lock_status
     assert isinstance(e_status, str) and e_status in ["on", "off"], f"Invalid etalon lock status: {e_status}"
-    return e_status == "on"
+    return True if  e_status == "on" else False
 
-def cavity_lock_status():
+def get_cavity_lock_status():
     c_status = control_loop.reference_cavity_lock_status
     assert isinstance(c_status, str) and c_status in ["on", "off"], f"Invalid cavity lock status: {c_status}"
-    return c_status == "on"
+    return True if  c_status == "on" else False
 
 def lock_etalon():
-    if etalon_lock_status():
+    if get_etalon_lock_status():
         control_loop.unlock_etalon()
         state["etalon_lock"] = "🔓"
     else:
@@ -97,7 +103,7 @@ def lock_etalon():
         state["etalon_lock"] = "🔐"
 
 def lock_cavity():
-    if cavity_lock_status():
+    if get_cavity_lock_status():
         control_loop.unlock_reference_cavity()
         state["cavity_lock"] = "🔓"
     else:
@@ -128,6 +134,7 @@ def start_scan():
     if not state.freq_lock_clicked:
         control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan)
         state.scan_button = True
+        state.scan_status = ":red[_Scan in Progress_]"
         state.scan = 1
         st.toast("👀 Scan started!")
     else:
@@ -136,6 +143,7 @@ def start_scan():
 def stop_scan():
     control_loop.stop_scan()
     state.scan_button = False
+    state.scan_status = ":red[_Scan is Forcibly Stopped_]"
     st.toast("👀 Scan stopped!")
 
 def scan_update():
@@ -143,6 +151,9 @@ def scan_update():
 
 def clear_plot():
     control_loop.clear_plot()
+
+def patient_update():
+    control_loop.patient_update()
 
 def clear_data():
     control_loop.clear_dataset()
@@ -184,7 +195,7 @@ def calculate_total_points(time_ps, rate, no_steps):
 
 def calculate_progress(progress, goal):
     percent = progress / goal
-    progress_text = f"{percent:.2%} % of scan have completed"
+    progress_text = f"{percent:.2%} % of scan have completed. Estimated Time Left: "
     return percent, progress_text
 
 def draw_progress_bar(total_points, progress_bar):
@@ -192,7 +203,11 @@ def draw_progress_bar(total_points, progress_bar):
     percent, progress_text = calculate_progress(point, total_points)
     progress_bar.progress(percent, text=progress_text)
 
-def loop(plot, dataf_space, reading_rate):
+def control_loop_update():
+    state.control_loop = control_loop
+    control_loop.update()
+
+def loop(plot, dataf_space):
     try:
         state.control_loop = control_loop
         control_loop.update()
@@ -214,8 +229,6 @@ def loop(plot, dataf_space, reading_rate):
         dataf_space.metric(label="Current Wavenumber", value=wn[-1])
         state.df_toSave = pd.DataFrame({'Time': ts_with_time, 'Wavenumber': wn_with_time})
 
-    reading_rate.metric(label="Reading Rate (ms)", value=control_loop.rate)
-    time.sleep(control_loop.rate * 0.001)
 
 def scan_settings():
     initialize_state('centroid_wnum_default', round(float(control_loop.wavenumber.get()), 5))
@@ -252,19 +265,25 @@ def scan_settings():
 
 def main():
     patient_netconnect()
+    patient_update()
 
     tab1, tab2 = sidebar.tabs(["Control", "Scan"])
+
+    etalon_lock_status = get_etalon_lock_status()
+    cavity_lock_status = get_cavity_lock_status()
+    initialize_lock("etalon_lock", etalon_lock_status)
+    initialize_lock("cavity_lock", cavity_lock_status)
 
     with tab1:
         st.header("SolsTis Control")
         l1, l2, l3 = st.columns([1, 1, 3], vertical_alignment="center")
         l1.write("**Etalon**")
-        l2.button(label=str(state["etalon_lock"]), on_click=lock_etalon, key="etalon_lock_button")
-        l3.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=round(float(control_loop.etalon_tuner_value), 5), format="%0.5f", disabled=etalon_lock_status())
+        l2.button(label=str(state.etalon_lock), on_click=lock_etalon, key="etalon_lock_button")
+        l3.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=round(float(control_loop.etalon_tuner_value), 5), format="%0.5f", disabled=etalon_lock_status)
 
         ll1, ll2, ll3 = st.columns([1, 1, 3], vertical_alignment="center")
         ll1.write("**Cavity**")
-        ll2.button(label=str(state["cavity_lock"]), on_click=lock_cavity, key="cavity_lock_button")
+        ll2.button(label=str(state.cavity_lock), on_click=lock_cavity, key="cavity_lock_button")
         ll3.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.reference_cavity_tuner_value), 5), format="%0.5f")
 
         st.header("Wavelength Locker")
@@ -300,13 +319,14 @@ def main():
             kd = st.slider("Derivative Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
             if st.form_submit_button("Update", on_click=pid_update):
                 st.toast("PID Control Updated!")
-
+ 
     with tab2:
         scan_settings()
-        button1, button2, button3 = st.columns([1, 1, 3])
+        button1, button2 = st.columns([1, 1])
         button1.button("Start Scan", on_click=start_scan, disabled=state.scan_button)
-        button2.button("Stop Scan", on_click=stop_scan, disabled=not state.scan_button)
-        button3.button("Update Time per Step", on_click=scan_update, disabled=not state.scan_button)
+        button2.button("Stop Scan", on_click=stop_scan, type="primary", disabled=not state.scan_button)
+        button1.markdown(state.scan_status)
+        button2.button("Update Time per Step", on_click=scan_update, disabled=not state.scan_button)
         scan_bar = st.progress(0, text="Scan Progress")
 
     plot = st.empty()
@@ -323,11 +343,12 @@ def main():
 
     while True:
         sleep_time = get_rate()
-        initialize_state("df_toSave", None)
-        loop(plot, dataf_space, reading_rate)
+        loop(plot, dataf_space)
         if state.scan == 1:
             total_points = calculate_total_points(state.time_per_scan, sleep_time, state.no_of_steps)
             draw_progress_bar(total_points, scan_bar)
+        reading_rate.metric(label="Reading Rate (s)", value=sleep_time)
+        time.sleep(sleep_time)
 
 if __name__ == "__main__":
     main()

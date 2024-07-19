@@ -106,9 +106,8 @@ class LaserControl(ControlLoop):
             raise ConnectionRefusedError
 
     def _update(self):
-        #print(self.state)
         self.wnum = round(float(self.wavenumber.get()), 5)
-        self.patient_update()
+        #print(self.wnum)
 
         if len(self.xDat) == 60:
             self.xDat = np.delete(self.xDat, 0)
@@ -182,7 +181,7 @@ class LaserControl(ControlLoop):
                 output_deltas = np.append(output_deltas, output_delta)
                 # print(i)
                 # print(output_delta)
-                time.sleep(0.1)
+                #time.sleep(0.1)
             closest_index = np.abs(output_deltas - delta).argmin()
             closest_number = list[closest_index]
             closest = np.append(closest, closest_number)
@@ -204,7 +203,7 @@ class LaserControl(ControlLoop):
             print(f"In {loop} loop now")
             for rate in rates:
                 first = round(float(self.wavenumber.get()), 5)
-                time.sleep(rate*0.001)
+                # time.sleep(rate*0.001)
                 second = round(float(self.wavenumber.get()), 5)
                 if first == second:
                     effective_rates = np.append(effective_rates, rate)
@@ -271,11 +270,16 @@ class LaserControl(ControlLoop):
         self.scan = 1
         self.j = 0
         self.jmax = no_scans
+        self.scan_progress = 0.
     
     def stop_scan(self):
         self.scan = 0
         self.state = 0
-        self.scan_progress = 0.
+
+    def end_scan(self):
+        self.scan = 0
+        self.state = 0
+        self.scan_progress = 100.
     
     def _do_scan(self):
         try:
@@ -288,7 +292,7 @@ class LaserControl(ControlLoop):
                     self.scan_time = 0
                     self.j += 1
                 else: 
-                    self.stop_scan()
+                    self.end_scan()
             else:
                 self.scan_time += round(self.rate*0.001, 5)
                 print(self.scan_time)
