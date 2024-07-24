@@ -1,6 +1,7 @@
 import streamlit as st
 import sys
 import os
+import wx
 import time
 import traceback
 import numpy as np
@@ -53,6 +54,10 @@ initialize_state('kd_enable', True)
 initialize_state("scan", 0)
 initialize_state("scan_button", False)
 initialize_state("scan_status", ":green[_Ready for Scan_]")
+initialize_state("dialog_dir", None)
+initialize_state("backup_enable", False)
+initialize_state("backup_name", None)
+initialize_state("backup_dir", None)
 initialize_state("df_toSave", None)
 initialize_state("max_points", 100)  # Limit to last 100 points for plotting
 
@@ -78,10 +83,10 @@ def patient_netconnect(tryouts=10):
             break
         except Exception as e:
             state.netcon_tries += 1
-            st.error(f"Unable to initialize the laser control due to error: {e}")
+            print(f"Unable to initialize the laser control due to error: {e} \n {traceback.format_exc()}")
             st.rerun()
     if state.netcon_tries > tryouts:
-        error_page(f"Unable to initialize the laser control after {tryouts} tries.", e)
+        error_page(f"Unable to initialize the laser control after {tryouts} tries.", ConnectionError)
         raise ConnectionError
 
 def get_etalon_lock_status():
@@ -158,49 +163,85 @@ def patient_update():
 def clear_data():
     control_loop.clear_dataset()
 
+@st.cache_data
 def get_rate():
-    return control_loop.rate*0.001
+    return control_loop.rate
+
+def get_cwnum():
+    return control_loop.get_current_wnum()
+
+def write_to_file(filename, filepath, x_data, y_data):
+    name = f"{filename}.csv"
+    path = os.path.join(filepath, name)
+    with open(path, 'a') as file:
+        file.write(f"{x_data}, {y_data} \n")
+
+def open_directory_dialog():
+    app = wx.App(False)
+    dialog = wx.DirDialog(None, "Choose a directory", style=wx.DD_DEFAULT_STYLE)
+    if dialog.ShowModal() == wx.ID_OK:
+        path = dialog.GetPath()
+    else:
+        path = None
+    dialog.Destroy()
+    return path
+
+def save_data(filename, filedir):
+    try:
+        name = f"{filename}.csv"
+        path = os.path.join(filedir, name)
+        control_loop.save_data(path)
+        st.success(f"File saved successfully to {path}")
+    except Exception as e:
+        st.error(f"**Failed to save file due to an error:** {e}")
+    
 
 @st.experimental_dialog("Save As")
 def save_file(data):
     filename = st.text_input("File Name:", placeholder="Enter the file name...")
-    filepath = st.text_input("File path:", placeholder="Enter the full path...")
-    # col1, col2 = st.columns([1, 4], vertical_alignment="bottom")
-    # col1.write("Select a folder to save the file:")
-    # if col1.button("Save to"):
-    #     folder_selected = askdirectory()
-    #     if folder_selected:
-    #         col2.write(f"Path: {folder_selected}")
+    #filepath = st.text_input("File path:", placeholder="Enter the full path...")
+    col1, col2 = st.columns([1.5, 4], vertical_alignment="bottom")
+    # if col1.button("Select Directory"):
+    #     directory = open_directory_dialog()
+    #     if directory:
+    #         col2.write(f"Selected directory: {directory}")
+    #         state.dialog_dir = directory
     #     else:
-    #         col2.write("No folder selected")
+    #         col2.write("No directory selected.")
 
     c1, c2 = st.columns(2)
     if c1.button("Save", key="save"):
-        try:
-            name = f"{filename}.csv"
-            path = os.path.join(filepath, name)
-            data.to_csv(path, index=False, mode = "x")
-            st.success(f"File saved successfully to {path}")
-        except Exception as e:
-            st.error(f"**Failed to save file due to an error:** {e}")
+        save_data(filename=filename, filedir=state.dialog_dir)
     
     if c2.button("Keep Running", type="primary", key="clear_saved_data"):
         clear_data()
         st.rerun()
 
+def start_backup_saving(name, path):
+    filename = f"{name}.csv"
+    filepath = os.path.join(path, filename)
+    control_loop.start_backup_saving(filepath)
+    state.backup_enable = True
+
+def stop_backup_saving():
+    control_loop.stop_backup_saving()
+
 @st.cache_data
 def calculate_total_points(time_ps, rate, no_steps):
-    total_points = round(time_ps / rate) * no_steps
-    return total_points
+    total_points = float(round(time_ps / rate) * no_steps)
+    total_time = time_ps * no_steps
+    return total_points, total_time
 
-def calculate_progress(progress, goal):
-    percent = progress / goal
-    progress_text = f"{percent:.2%} % of scan have completed. Estimated Time Left: "
+def calculate_progress(progress, total_points, total_time):
+    percent = round(progress / total_points, 4)
+    etc = round((1 - percent) * total_time, 1)
+    progress_text = f"{percent:.2%} % of scan have completed. :blue[_Estimated Time of Completion: {etc} seconds left_]"
     return percent, progress_text
 
-def draw_progress_bar(total_points, progress_bar):
+def draw_progress_bar(total_points, total_time, progress_bar):
     point = control_loop.scan_progress
-    percent, progress_text = calculate_progress(point, total_points)
+    percent, progress_text = calculate_progress(point, total_points, total_time)
+    #print(f"point={point}, total_points ={total_points}, total_time={total_time}, percent:{percent}")
     progress_bar.progress(percent, text=progress_text)
 
 def control_loop_update():
@@ -215,23 +256,27 @@ def loop(plot, dataf_space):
         error_page("Unable to update laser information.", e)
 
     # Time series plot
-    ts, wn, ts_with_time, wn_with_time = control_loop.xDat, control_loop.yDat, control_loop.xDat_with_time, control_loop.yDat_with_time
-    if len(ts) > 0 and len(wn) > 0:
+    dataf = control_loop.get_df_to_plot()
+    # ts, wn, ts_with_time, wn_with_time = control_loop.xDat, control_loop.yDat, control_loop.xDat_with_time, control_loop.yDat_with_time
+    if not dataf.empty:
         # Only use the last 'max_points' data points for plotting
-        ts = ts[-state.max_points:]
-        wn = wn[-state.max_points:]
+        # ts = ts[-state.max_points:]
+        # wn = wn[-state.max_points:]
 
-        dataf = pd.DataFrame({"Wavenumber (cm^-1)": wn}, index=ts)
+        # dataf = pd.DataFrame({"Wavenumber (cm^-1)": wn}, index=ts)
         fig = dataf.iplot(kind="scatter", title="Wavenumber VS Time", xTitle="Time(s)", yTitle="Wavenumber (cm^-1)", asFigure=True, mode="lines+markers", colors=["pink"])
         fig.update_xaxes(exponentformat="none")
         fig.update_yaxes(exponentformat="none")
         plot.plotly_chart(fig)
-        dataf_space.metric(label="Current Wavenumber", value=wn[-1])
-        state.df_toSave = pd.DataFrame({'Time': ts_with_time, 'Wavenumber': wn_with_time})
+    c_wnum = get_cwnum()
+    dataf_space.metric(label="Current Wavenumber", value=c_wnum)
+        # state.df_toSave = pd.DataFrame({'Time': ts_with_time, 'Wavenumber': wn_with_time})
+    # if state.backup_enable:
+    #     write_to_file(state.backup_name, state.backup_dir, ts_with_time[-1], wn_with_time[-1])
 
 
 def scan_settings():
-    initialize_state('centroid_wnum_default', round(float(control_loop.wavenumber.get()), 5))
+    initialize_state('centroid_wnum_default', get_cwnum())
     st.header("Scan Settings")
     c1, c2 = st.columns(2, vertical_alignment='bottom')
     start_wnum = c1.number_input("Start Wavenumber (cm^-1)", value=state.centroid_wnum_default, step=0.00001, format="%0.5f", key="start_wnum")
@@ -265,90 +310,112 @@ def scan_settings():
 
 def main():
     patient_netconnect()
-    patient_update()
-
-    tab1, tab2 = sidebar.tabs(["Control", "Scan"])
-
-    etalon_lock_status = get_etalon_lock_status()
-    cavity_lock_status = get_cavity_lock_status()
-    initialize_lock("etalon_lock", etalon_lock_status)
-    initialize_lock("cavity_lock", cavity_lock_status)
-
-    with tab1:
-        st.header("SolsTis Control")
-        l1, l2, l3 = st.columns([1, 1, 3], vertical_alignment="center")
-        l1.write("**Etalon**")
-        l2.button(label=str(state.etalon_lock), on_click=lock_etalon, key="etalon_lock_button")
-        l3.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=round(float(control_loop.etalon_tuner_value), 5), format="%0.5f", disabled=etalon_lock_status)
-
-        ll1, ll2, ll3 = st.columns([1, 1, 3], vertical_alignment="center")
-        ll1.write("**Cavity**")
-        ll2.button(label=str(state.cavity_lock), on_click=lock_cavity, key="cavity_lock_button")
-        ll3.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.reference_cavity_tuner_value), 5), format="%0.5f")
-
-        st.header("Wavelength Locker")
-        with st.form("Lock Wavenumber", clear_on_submit=True, border=False):
-            a1, a2 = st.columns([2.7, 1], vertical_alignment="bottom")
-            t_wnum = a1.number_input("Target Wavenumber (cm^-1)", value=round(float(control_loop.wavenumber.get()), 5), step=0.00001, format="%0.5f", key="t_wnum")
-            if a2.form_submit_button("Lock", on_click=freq_lock):
-                st.toast("Wavelength Locked!")
-
-        unlock1, unlock2 = st.columns([2.7, 1], vertical_alignment="bottom")
-        unlock1.markdown(":red[_Wavelength Not Locked_]" if not state.freq_lock_clicked else ":red[_Wavelength Lock in Progress_]")
-        unlock2.button("Unlock", disabled=not state.freq_lock_clicked, on_click=freq_unlock)
-
-        st.subheader("PID Control")
-        word1, word2 = st.columns([3, 1], vertical_alignment="bottom")
-        word2.write("Enable")
-        pid1, pid2 = st.columns([3, 1], vertical_alignment="top")
-        with pid2:
-            st.write('<div style="height: 26px;">\n</div>', unsafe_allow_html=True)
-            kp_enable = st.checkbox("p", value=not state.kp_enable)
-            st.write('<div style="height: 38px;">\n</div>', unsafe_allow_html=True)
-            ki_enable = st.checkbox("i", value=not state.ki_enable)
-            st.write('<div style="height: 38px;">\n</div>', unsafe_allow_html=True)
-            kd_enable = st.checkbox("d", value=not state.kd_enable)
-
-        state.kp_enable = not kp_enable
-        state.ki_enable = not ki_enable
-        state.kd_enable = not kd_enable
-
-        with pid1.form("PID Control", clear_on_submit=True, border=False):
-            kp = st.slider("Proportional Gain", min_value=0.0, max_value=50.0, value=50.0, step=0.1, format="%0.2f", key="kp")
-            ki = st.slider("Integral Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
-            kd = st.slider("Derivative Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
-            if st.form_submit_button("Update", on_click=pid_update):
-                st.toast("PID Control Updated!")
- 
-    with tab2:
-        scan_settings()
-        button1, button2 = st.columns([1, 1])
-        button1.button("Start Scan", on_click=start_scan, disabled=state.scan_button)
-        button2.button("Stop Scan", on_click=stop_scan, type="primary", disabled=not state.scan_button)
-        button1.markdown(state.scan_status)
-        button2.button("Update Time per Step", on_click=scan_update, disabled=not state.scan_button)
-        scan_bar = st.progress(0, text="Scan Progress")
-
-    plot = st.empty()
-    place1, place2, place3, place4, place5 = st.columns([4, 3, 1, 1, 1], vertical_alignment="center")
-    dataf_space = place1.empty()
-    reading_rate = place2.empty()
-    if place3.button("Save"):
-        save_file(state.df_toSave)
-        st.stop()
-    if place4.button("Clear Plot"):
-        clear_plot()
-    if place5.button("Rerun", type="primary"):
-        st.rerun()
-
-    while True:
+    try:
+        state.netcon_tries = 0
+        patient_update()
         sleep_time = get_rate()
-        loop(plot, dataf_space)
-        if state.scan == 1:
-            total_points = calculate_total_points(state.time_per_scan, sleep_time, state.no_of_steps)
-            draw_progress_bar(total_points, scan_bar)
-        reading_rate.metric(label="Reading Rate (s)", value=sleep_time)
-        time.sleep(sleep_time)
+
+        tab1, tab2, tab3 = sidebar.tabs(["Control", "Scan", "Back-up Saving"])
+
+        etalon_lock_status = get_etalon_lock_status()
+        cavity_lock_status = get_cavity_lock_status()
+        initialize_lock("etalon_lock", etalon_lock_status)
+        initialize_lock("cavity_lock", cavity_lock_status)
+        initialize_state('c_wnum', get_cwnum())
+
+        with tab1:
+            st.header("SolsTis Control")
+            l1, l2, l3 = st.columns([1, 1, 3], vertical_alignment="center")
+            l1.write("**Etalon**")
+            l2.button(label=str(state.etalon_lock), on_click=lock_etalon, key="etalon_lock_button")
+            l3.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=round(float(control_loop.etalon_tuner_value), 5), format="%0.5f", disabled=etalon_lock_status)
+
+            ll1, ll2, ll3 = st.columns([1, 1, 3], vertical_alignment="center")
+            ll1.write("**Cavity**")
+            ll2.button(label=str(state.cavity_lock), on_click=lock_cavity, key="cavity_lock_button")
+            ll3.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.reference_cavity_tuner_value), 5), format="%0.5f")
+
+            st.header("Wavelength Locker")
+            with st.form("Lock Wavenumber", border=False):
+                a1, a2 = st.columns([2.7, 1], vertical_alignment="bottom")
+                t_wnum = a1.number_input("Target Wavenumber (cm^-1)", value=state.c_wnum, step=0.00001, format="%0.5f", key="t_wnum")
+                a2.form_submit_button("Lock", on_click=freq_lock)
+
+            unlock1, unlock2 = st.columns([2.7, 1], vertical_alignment="bottom")
+            unlock1.markdown(":red[_Wavelength Not Locked_]" if not state.freq_lock_clicked else ":red[_Wavelength Lock in Progress_]")
+            unlock2.button("Unlock", disabled=not state.freq_lock_clicked, on_click=freq_unlock)
+
+            st.subheader("PID Control")
+            word1, word2 = st.columns([3, 1], vertical_alignment="bottom")
+            word2.write("Enable")
+            pid1, pid2 = st.columns([3, 1], vertical_alignment="top")
+            with pid2:
+                st.write('<div style="height: 26px;">\n</div>', unsafe_allow_html=True)
+                kp_enable = st.checkbox("p", value=not state.kp_enable)
+                st.write('<div style="height: 38px;">\n</div>', unsafe_allow_html=True)
+                ki_enable = st.checkbox("i", value=not state.ki_enable)
+                st.write('<div style="height: 38px;">\n</div>', unsafe_allow_html=True)
+                kd_enable = st.checkbox("d", value=not state.kd_enable)
+
+            state.kp_enable = not kp_enable
+            state.ki_enable = not ki_enable
+            state.kd_enable = not kd_enable
+
+            with pid1.form("PID Control", border=False):
+                kp = st.slider("Proportional Gain", min_value=0.0, max_value=100.0, value=50.0, step=0.1, format="%0.2f", key="kp", disabled=state.kp_enable)
+                ki = st.slider("Integral Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
+                kd = st.slider("Derivative Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
+                if st.form_submit_button("Update", on_click=pid_update):
+                    st.toast("PID Control Updated!")
+    
+        with tab2:
+            scan_settings()
+            button1, button2 = st.columns([1, 1])
+            button1.button("Start Scan", on_click=start_scan, disabled=state.scan_button)
+            button2.button("Stop Scan", on_click=stop_scan, type="primary", disabled=not state.scan_button)
+            button1.markdown(state.scan_status)
+            button2.button("Update Time per Step", on_click=scan_update, disabled=not state.scan_button)
+            scan_bar = st.progress(0., text="Scan Progress")
+        
+        with tab3:
+            
+            backup_name = st.text_input("File Name:", placeholder="Enter the file name...")
+            #backup_dir = st.text_input("File path:", placeholder="Enter the full path...")
+            col1, col2 = st.columns([1.5, 4], vertical_alignment="bottom")
+            if col1.button("Select Directory"):
+                directory = open_directory_dialog()
+                if directory:
+                    col2.write(f"Selected directory: {directory}")
+                    state.dialog_dir = directory
+                else:
+                    col2.write("No directory selected.")
+            if st.button("Start Back-up Saving", disabled = state.backup_enable):
+                start_backup_saving(backup_name, state.dialog_dir)
+                st.markdown(f":blue[_Data automatically being saved to {state.dialog_dir}_]")
+            st.button("Stop Back-up Saving", on_click=stop_backup_saving, disabled = not state.backup_enable)
+
+        plot = st.empty()
+        place1, place2, place3, place4, place5 = st.columns([4, 3, 1, 1, 1], vertical_alignment="center")
+        dataf_space = place1.empty()
+        reading_rate = place2.empty()
+        if place3.button("Save"):
+            save_file(state.df_toSave)
+            st.stop()
+        if place4.button("Clear Plot"):
+            clear_plot()
+        if place5.button("Rerun", type="primary"):
+            st.rerun()
+
+        while True:
+            loop(plot, dataf_space)
+            reading_rate.metric(label="Reading Rate (s)", value=sleep_time)
+            if state.scan == 1:
+                total_points, total_time = calculate_total_points(state.time_per_scan, sleep_time, state.no_of_steps)
+                draw_progress_bar(total_points, total_time, scan_bar)
+            time.sleep(sleep_time)
+    except KeyboardInterrupt:
+        control_loop.stop()
+
 
 if __name__ == "__main__":
     main()
