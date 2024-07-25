@@ -56,8 +56,8 @@ class EMAServerReader:
         self.verbose = verbose
         self.last_ntp_sync_time = time.time()
         self.offset = 0
-        self.xDat = np.array([])
-        self.yDat = np.array([])
+        self.xDat = []
+        self.yDat = []
         self.first_time = 0.
         self.plot_limit = plot_limit
         self.reading_thread = None
@@ -125,7 +125,7 @@ class EMAServerReader:
                     time.sleep(self.reading_frequency)
                     continue
                 # if self.verbose:
-                #     print(payload)
+                #     print("Reading thread doing work")
 
                 self.update_plot_df(current_time, current_wnum)
                 if self.saving_dir is not None:
@@ -146,16 +146,28 @@ class EMAServerReader:
         self.dataframe = pd.concat([self.dataframe, df], ignore_index=True)
     
     def update_plot_df(self, current_time, current_wnum):
+        # if len(self.xDat) == self.plot_limit:
+        #     self.xDat = np.delete(self.xDat, 0)
+        #     self.yDat = np.delete(self.yDat, 0)
+        # if len(self.xDat) == 0:
+        #     self.xDat = np.array([0])
+        #     self.first_time = self.get_time()
+        # else:
+        #     rel_time = current_time - self.first_time
+        #     self.xDat = np.append(self.xDat, rel_time)    
+        # self.yDat = np.append(self.yDat, current_wnum)
         if len(self.xDat) == self.plot_limit:
-            self.xDat = np.delete(self.xDat, 0)
-            self.yDat = np.delete(self.yDat, 0)
+            self.xDat.pop(0)
+            self.yDat.pop(0)
+
         if len(self.xDat) == 0:
-            self.xDat = np.array([0])
             self.first_time = self.get_time()
+            self.xDat.append(0)
         else:
             rel_time = current_time - self.first_time
-            self.xDat = np.append(self.xDat, rel_time)    
-        self.yDat = np.append(self.yDat, current_wnum)       
+            self.xDat.append(rel_time)
+        
+        self.yDat.append(current_wnum)       
 
     def save_full_df(self, dir):
         if not self.dataframe.empty:
@@ -176,8 +188,11 @@ class EMAServerReader:
             if self.verbose:
                 print(f"Dava being saved to {self.saving_dir}")
     
+    def get_plot_data(self):
+        return self.xDat, self.yDat
+    
     def clear_plot(self):
-        self.xDat, self.yDat = np.array([]), np.array([])
+        self.xDat, self.yDat = [], []
 
     def get_latest_data(self) -> Optional[Dict[str, Any]]:
         return self.latest_data
@@ -302,12 +317,11 @@ class LaserControl(ControlLoop):
         if self.state == 1:
         #lock-in the wavelength of laser mode
             #print("locked")
-            self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
             #set the wavelength to the target
             if self.init == 1:
                 delta = self.target - self.wnum
                 delta *= self.conversion
-                self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - delta)
+                self.tune_reference_cavity(float(self.reference_cavity_tuner_value) - delta)
                 self.init = 0
                 self.pid.setpoint = self.target
                 print("wavelength set")
@@ -326,6 +340,7 @@ class LaserControl(ControlLoop):
     def update(self):
         try:
             self._update()
+            return 1
         except Exception as e:
             print(f"Error in LaserControl._update: {e}")
             pass
@@ -346,7 +361,9 @@ class LaserControl(ControlLoop):
         # ts = arrays[0, :]
         # ts = ts - ts[0]
         # wn = arrays[1, :]
-        ts, wn = self.reader.xDat, self.reader.yDat
+        ts, wn = self.reader.get_plot_data()
+        # if len(ts)>0 and len(wn)>0:
+        #     print(ts[-1], wn[-1])
         df_to_plot = pd.DataFrame({"Wavenumber (cm^-1)": wn}, index = ts)
         return df_to_plot
 
@@ -369,7 +386,7 @@ class LaserControl(ControlLoop):
                 input_wnum = self.reader.get_read_value()
                 i = round(i,0)    
                 u = i * delta
-                self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)                
+                self.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)             
                 output_wnum = self.reader.get_read_value()
                 output_delta = np.abs(output_wnum - input_wnum)
                 output_deltas = np.append(output_deltas, output_delta)
@@ -425,7 +442,8 @@ class LaserControl(ControlLoop):
     
     def _pid_control(self):
         u = self.pid.update(self.wnum)
-        self.laser.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
+        tuning = float(self.reference_cavity_tuner_value) - u
+        self.tune_reference_cavity(tuning)
 
     def get_current_wnum(self):
         return self.wnum
@@ -435,14 +453,12 @@ class LaserControl(ControlLoop):
         print(f"lock function called with state being {self.state}")
         self.target = value
         self.init = 1
-        self.xDat = np.array([])
-        self.yDat = np.array([])
+        self.clear_plot()
 
     def unlock(self):
         self.state = 0
         self.scan = 0
-        self.xDat = np.array([])
-        self.yDat = np.array([])
+        self.clear_plot()
 
     def lock_etalon(self):
         self.laser.lock_etalon()
@@ -458,9 +474,23 @@ class LaserControl(ControlLoop):
 
     def tune_reference_cavity(self, value):
         self.laser.tune_reference_cavity(value)
-
+        self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
+        
     def tune_etalon(self, value):
         self.laser.tune_etalon(value)
+        self.etalon_tuner_value = self.laser.get_full_web_status()['etalon_tune']
+    
+    def get_etalon_tuner(self):
+        return self.etalon_tuner_value
+
+    def get_ref_cav_tuner(self):
+        return self.reference_cavity_tuner_value
+
+    def update_etalon_lock_status(self):
+        self.etalon_lock_status = self.laser.get_etalon_lock_status()
+
+    def update_ref_cav_lock_status(self):
+        self.reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
 
     def start_scan(self, start, end, no_scans, time_per_scan):
         self.scan_targets = np.linspace(start, end, no_scans)
