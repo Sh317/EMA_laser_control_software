@@ -58,6 +58,7 @@ class EMAServerReader:
         self.offset = 0
         self.xDat = []
         self.yDat = []
+        self.y_for_average = np.array([])
         self.first_time = 0.
         self.plot_limit = plot_limit
         self.reading_thread = None
@@ -163,11 +164,17 @@ class EMAServerReader:
         if len(self.xDat) == 0:
             self.first_time = self.get_time()
             self.xDat.append(0)
+            self.yDat.append(current_wnum)
+        
+        if len(self.y_for_average) < 5:
+            self.y_for_average = np.append(self.y_for_average, current_wnum)
         else:
             rel_time = current_time - self.first_time
             self.xDat.append(rel_time)
-        
-        self.yDat.append(current_wnum)       
+            mean = np.mean(self.y_for_average)
+            self.yDat.append(mean)
+            self.y_for_average = np.array([])
+            self.y_for_average = np.append(self.y_for_average, current_wnum)            
 
     def save_full_df(self, dir):
         if not self.dataframe.empty:
@@ -428,9 +435,8 @@ class LaserControl(ControlLoop):
         self.laser.unlock_reference_cavity()
 
     def tune_reference_cavity(self, value):
-        #self.laser.tune_reference_cavity(value)
-        #self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
-        self.reference_cavity_tuner_value = 10.
+        self.laser.tune_reference_cavity(value)
+        self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
         
     def tune_etalon(self, value):
         self.laser.tune_etalon(value)
@@ -468,7 +474,6 @@ class LaserControl(ControlLoop):
         self.scan = 0
         self.state = 0
         self.scan_progress = 100.
-        self.stop_tweaking()
     
     def _do_scan(self):
         try:
@@ -486,7 +491,7 @@ class LaserControl(ControlLoop):
                 self.scan_time += self.rate
                 print(self.scan_time)
                 #to convert rate to seconds
-            print(f"progress:{self.scan_progress}")
+            print(f"progress:{self.j}, total:{self.jmax}")
         except IndexError:
             self.scan = 0
             self.state = 0

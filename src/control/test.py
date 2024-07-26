@@ -427,9 +427,9 @@ class LaserControl():
         self.laser.unlock_reference_cavity()
 
     def tune_reference_cavity(self, value):
-        self.laser.tune_reference_cavity(value)
+        a = self.laser.tune_reference_cavity(value, sync=False)
         #self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
-        return self.reference_cavity_tuner_value
+        return a
         
     def tune_etalon(self, value):
         self.laser.tune_etalon(value)
@@ -597,10 +597,14 @@ class LaserControl():
 
 control_loop = LaserControl("192.168.1.222", 39933, "LaserLab:wavenumber_1", verbose=True)
 i=0
+a=None
 tuner = control_loop.get_ref_cav_tuner()
 
 while True:
-    i += 0.1
-    value = control_loop.tune_reference_cavity(tuner)
-    print(f"{i}:{value}")
-    time.sleep(0.1)
+    i += 1
+    if a is None:
+        a = "something"
+        a = control_loop.tune_reference_cavity(tuner)
+        print("this works")
+    print(f"{i}:{a}")
+    time.sleep(0.2)

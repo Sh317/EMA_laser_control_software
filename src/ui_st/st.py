@@ -158,7 +158,15 @@ def stop_scan():
     control_loop.stop_scan()
     state.scan_button = False
     state.scan_status = ":red[_Scan is Forcibly Stopped_]"
+    state.scan = 0
     st.toast("👀 Scan stopped!")
+
+def end_scan():
+    control_loop.stop_tweaking()
+    state.scan_button = False
+    state.scan_status = ":green[_Scan Finished_]"
+    state.scan = 0
+    st.toast("Scan Completed!")
 
 def scan_update():
     control_loop.scan_update(state.time_per_scan)
@@ -236,7 +244,6 @@ def stop_backup_saving():
     control_loop.stop_backup_saving()
     state.backup_enable = False
 
-@st.cache_data
 def calculate_total_points(time_ps, rate, no_steps):
     total_points = float(round(time_ps / rate) * no_steps)
     total_time = time_ps * no_steps
@@ -250,12 +257,14 @@ def calculate_progress(progress, total_points, total_time):
 
 def draw_progress_bar(total_points, total_time, progress_bar):
     point = control_loop.scan_progress
-    percent, progress_text = calculate_progress(point, total_points, total_time)
-    #print(f"point={point}, total_points ={total_points}, total_time={total_time}, percent:{percent}")
-    if percent >= 1:
-        percent = 1.
+    if point < total_points:
+        percent, progress_text = calculate_progress(point, total_points, total_time)
+        #print(f"point={point}, total_points ={total_points}, total_time={total_time}, percent:{percent}")
         progress_bar.progress(percent, text=progress_text)
-    else: progress_bar.progress(percent, text=progress_text)
+    else:
+        print("scan stopped")
+        end_scan()
+        progress_bar.progress(1., text="Scan Completed!")
 
 def control_loop_update():
     state.control_loop = control_loop
@@ -426,7 +435,7 @@ def main():
         if state.scan == 1:
             total_points, total_time = calculate_total_points(state.time_per_scan, sleep_time, state.no_of_steps)
             draw_progress_bar(total_points, total_time, scan_bar)
-        loop(plot, dataf_space, sleep_time)
+        loop(plot, dataf_space, 0.5)
 
 
 if __name__ == "__main__":
