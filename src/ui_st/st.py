@@ -71,7 +71,7 @@ def error_page(description, error):
         st.rerun()
 
 def ins_laser(laser_tag):
-    return LaserControl("192.168.1.222", 39933, f"LaserLab:{laser_tag}")
+    return LaserControl("192.168.1.222", 39933, f"LaserLab:{laser_tag}", verbose=True)
 
 def patient_netconnect(tryouts=10):
     global control_loop
@@ -252,13 +252,16 @@ def draw_progress_bar(total_points, total_time, progress_bar):
     point = control_loop.scan_progress
     percent, progress_text = calculate_progress(point, total_points, total_time)
     #print(f"point={point}, total_points ={total_points}, total_time={total_time}, percent:{percent}")
-    progress_bar.progress(percent, text=progress_text)
+    if percent >= 1:
+        percent = 1.
+        progress_bar.progress(percent, text=progress_text)
+    else: progress_bar.progress(percent, text=progress_text)
 
-async def control_loop_update():
+def control_loop_update():
     state.control_loop = control_loop
     control_loop.update()
 
-async def loop(plot, dataf_space, sleep_time):
+def loop(plot, dataf_space, sleep_time):
 
     # Time series plot
     dataf = control_loop.get_df_to_plot()
@@ -269,13 +272,13 @@ async def loop(plot, dataf_space, sleep_time):
         # wn = wn[-state.max_points:]
 
         # dataf = pd.DataFrame({"Wavenumber (cm^-1)": wn}, index=ts)
-        fig = dataf.iplot(kind="scatter", title="Wavenumber VS Time", xTitle="Time(s)", yTitle="Wavenumber (cm^-1)", asFigure=True, mode="lines+markers", colors=["pink"])
+        fig = dataf.iplot(kind="scatter", title="Wavenumber VS Time", xTitle="Time(s)", yTitle="Wavenumber (cm^-1)", asFigure=True, mode="lines+markers", size=8, colors=["pink"])
         fig.update_xaxes(exponentformat="none")
         fig.update_yaxes(exponentformat="none")
         plot.plotly_chart(fig)
     c_wnum = get_cwnum()
     dataf_space.metric(label="Current Wavenumber", value=c_wnum)
-    await asyncio.sleep(sleep_time)
+    time.sleep(sleep_time)
         # state.df_toSave = pd.DataFrame({'Time': ts_with_time, 'Wavenumber': wn_with_time})
     # if state.backup_enable:
     #     write_to_file(state.backup_name, state.backup_dir, ts_with_time[-1], wn_with_time[-1])
@@ -347,7 +350,7 @@ def main():
         with st.form("Lock Wavenumber", border=False):
             a1, a2 = st.columns([2.7, 1], vertical_alignment="bottom")
             t_wnum = a1.number_input("Target Wavenumber (cm^-1)", value=state.c_wnum, step=0.00001, format="%0.5f", key="t_wnum")
-            a2.form_submit_button("Lock", on_click=freq_lock)
+            a2.form_submit_button("Lock", on_click=freq_lock, disabled=state.freq_lock_clicked)
 
         unlock1, unlock2 = st.columns([2.7, 1], vertical_alignment="bottom")
         unlock1.markdown(":red[_Wavelength Not Locked_]" if not state.freq_lock_clicked else ":red[_Wavelength Lock in Progress_]")
@@ -416,14 +419,14 @@ def main():
 
     while True:
         try:
-            asyncio.run(control_loop_update())
+            control_loop_update()
         except Exception as e:
             error_page("Unable to update laser information.", e)
         reading_rate.metric(label="Reading Rate (s)", value=sleep_time)
         if state.scan == 1:
             total_points, total_time = calculate_total_points(state.time_per_scan, sleep_time, state.no_of_steps)
             draw_progress_bar(total_points, total_time, scan_bar)
-        asyncio.run(loop(plot, dataf_space, sleep_time))
+        loop(plot, dataf_space, sleep_time)
 
 
 if __name__ == "__main__":
