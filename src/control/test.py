@@ -1,7 +1,6 @@
 from pylablib.devices import M2
 import numpy as np
 from epics import PV
-from .base import ControlLoop
 import datetime
 import time
 import pandas as pd
@@ -202,7 +201,7 @@ class EMAServerReader:
 
 
 
-class LaserControl(ControlLoop):
+class LaserControl():
     def __init__(self, ip_address, port, wavenumber_pv, verbose):
         self.laser = None
         self.ip_address = ip_address
@@ -227,7 +226,7 @@ class LaserControl(ControlLoop):
         self.reader = EMAServerReader(pv_name=wavenumber_pv, reading_frequency=self.rate, saving_dir=None, verbose=True)
         #A list of commands to be sent to the laser 
         self.patient_setup_status()
-        self.start_reading()
+        #self.start_reading()
         self.set_current_wnum()
 
     def start_reading(self):
@@ -428,9 +427,9 @@ class LaserControl(ControlLoop):
         self.laser.unlock_reference_cavity()
 
     def tune_reference_cavity(self, value):
-        #self.laser.tune_reference_cavity(value)
+        self.laser.tune_reference_cavity(value)
         #self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
-        self.reference_cavity_tuner_value = 10.
+        return self.reference_cavity_tuner_value
         
     def tune_etalon(self, value):
         self.laser.tune_etalon(value)
@@ -440,6 +439,7 @@ class LaserControl(ControlLoop):
         return self.etalon_tuner_value
 
     def get_ref_cav_tuner(self):
+        self.reference_cavity_tuner_value = self.laser.get_full_status(include = ['web_status'])['web_status']['cavity_tune']
         return self.reference_cavity_tuner_value
 
     def update_etalon_lock_status(self):
@@ -593,3 +593,14 @@ class LaserControl(ControlLoop):
     def stop(self):
         self.reader.stop_reading()
         pass
+
+
+control_loop = LaserControl("192.168.1.222", 39933, "LaserLab:wavenumber_1", verbose=True)
+i=0
+tuner = control_loop.get_ref_cav_tuner()
+
+while True:
+    i += 0.1
+    value = control_loop.tune_reference_cavity(tuner)
+    print(f"{i}:{value}")
+    time.sleep(0.1)
