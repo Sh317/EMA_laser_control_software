@@ -43,7 +43,7 @@ class PIDController:
 
 class EMAServerReader:
     def __init__(self, pv_name: str, saving_dir: str = None, reading_frequency: float = 0.1,
-                 write_each: float = 100, ntp_sync_interval: float = 60, verbose: bool = False, plot_limit: int = 60):
+                 write_each: float = 100, ntp_sync_interval: float = 60, verbose: bool = False, plot_limit: int = 300):
         self.name = pv_name
         self.pv = PV(pv_name)
         self.saving_dir = saving_dir
@@ -475,8 +475,9 @@ class LaserControl(ControlLoop):
         return self.reference_cavity_tuner_value
     
     async def update_ref_cav_tuner(self):
+        before = self.reference_cavity_tuner_value
         value = await asyncio.get_event_loop().run_in_executor(None, self.get_ref_cav_tuner)
-        print(f"Tuner value updated to {value}")
+        print(f"Tuner value updated from {before} to {value}")
 
     def update_etalon_lock_status(self):
         self.etalon_lock_status = self.laser.get_etalon_lock_status()

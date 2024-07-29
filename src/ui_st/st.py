@@ -161,13 +161,13 @@ def stop_scan():
     state.scan = 0
     st.toast("👀 Scan stopped!")
 
-def end_scan():
+def end_scan(placeholder):
     control_loop.stop_tweaking()
     state.scan_button = False
     state.scan_status = ":green[_Scan Finished_]"
     state.scan = 0
+    draw_scanning(placeholder)
     st.toast("Scan Completed!")
-    st.rerun()
 
 def scan_update():
     control_loop.scan_update(state.time_per_scan)
@@ -256,7 +256,7 @@ def calculate_progress(progress, total_time):
     progress_text = f"{percent:.2%} % of scan have completed. :blue[_Estimated Time of Completion: {etc} seconds left_]"
     return percent, progress_text
 
-def draw_progress_bar(total_time, progress_bar):
+def draw_progress_bar(total_time, progress_bar, scan_placeholder):
     progress = control_loop.scan_progress
     if progress < total_time:
         percent, progress_text = calculate_progress(progress, total_time)
@@ -264,7 +264,7 @@ def draw_progress_bar(total_time, progress_bar):
         progress_bar.progress(percent, text=progress_text)
     else:
         print("scan stopped")
-        end_scan()
+        end_scan(scan_placeholder)
         progress_bar.progress(1., text="Scan Completed!")
 
 def control_loop_update():
@@ -438,7 +438,7 @@ def main():
         reading_rate.metric(label="Reading Rate (s)", value=sleep_time)
         if state.scan == 1:
             total_time = control_loop.total_time
-            draw_progress_bar(total_time, scan_bar)
+            draw_progress_bar(total_time, scan_bar, scan_placeholder)
         loop(plot, dataf_space, 0.1)
 
 
