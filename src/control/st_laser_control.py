@@ -128,7 +128,8 @@ class EMAServerReader:
                 # if self.verbose:
                 #     print("Reading thread doing work")
 
-                self.update_plot_df(current_time, current_wnum)
+                #self.update_plot_df(current_time, current_wnum)
+                self.update_plot_df_no_average(current_time, current_wnum)
                 if self.saving_dir is not None:
                     self.save_single(current_time, current_wnum)
                     t0 = current_time  # Reset the saving time interval
@@ -141,6 +142,8 @@ class EMAServerReader:
         self.is_reading = False
         if self.reading_thread:
             self.reading_thread.join()
+            if self.verbose:
+                print("Reading thread caught")
 
     def update_full_df(self, payload: List[Dict[str, Any]]):
         df = pd.DataFrame(payload)
@@ -174,7 +177,21 @@ class EMAServerReader:
             mean = np.mean(self.y_for_average)
             self.yDat.append(mean)
             self.y_for_average = np.array([])
-            self.y_for_average = np.append(self.y_for_average, current_wnum)            
+            self.y_for_average = np.append(self.y_for_average, current_wnum)
+
+    def update_plot_df_no_average(self, current_time, current_wnum):
+        if len(self.xDat) == self.plot_limit:
+            self.xDat.pop(0)
+            self.yDat.pop(0)
+
+        if len(self.xDat) == 0:
+            self.first_time = self.get_time()
+            self.xDat.append(0)
+        else:
+            rel_time = current_time - self.first_time
+            self.xDat.append(rel_time)
+        
+        self.yDat.append(current_wnum)              
 
     def save_full_df(self, dir):
         if not self.dataframe.empty:
@@ -224,12 +241,18 @@ class LaserControl(ControlLoop):
         # self.yDat_with_time = np.array([])
         self.target = 0.0
         self.scan_progress = 0.
+        self.total_time = 0.
+        self.scan_step_start_time = 0.
         self.rate = 0.1  #in seconds
         self.conversion = 60
         self.now = datetime.datetime.now()
+        self.reply = None
         self.verbose = verbose
+        self.update_tuner = 0
         self.tweaking_thread = None
         self.is_tweaking = False
+        self.scan_restarted = False
+        self.scan_start_time = 0.
         self.pid = PIDController(kp=50., ki=0., kd=0., setpoint=self.target)######
         self.reader = EMAServerReader(pv_name=wavenumber_pv, reading_frequency=self.rate, saving_dir=None, verbose=True)
         #A list of commands to be sent to the laser 
@@ -363,7 +386,8 @@ class LaserControl(ControlLoop):
                 input_wnum = self.reader.get_read_value()
                 i = round(i,0)    
                 u = i * delta
-                self.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)             
+                self.tune_reference_cavity(float(self.reference_cavity_tuner_value) - u)
+                #The use of tune_ref_cav is outdated here             
                 output_wnum = self.reader.get_read_value()
                 output_delta = np.abs(output_wnum - input_wnum)
                 output_deltas = np.append(output_deltas, output_delta)
@@ -435,8 +459,9 @@ class LaserControl(ControlLoop):
         self.laser.unlock_reference_cavity()
 
     def tune_reference_cavity(self, value):
-        self.laser.tune_reference_cavity(value)
-        self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
+        if self.reply is None:
+            self.reply = "something"
+            self.reply = self.laser.tune_reference_cavity(value, sync=False)
         
     def tune_etalon(self, value):
         self.laser.tune_etalon(value)
@@ -446,7 +471,12 @@ class LaserControl(ControlLoop):
         return self.etalon_tuner_value
 
     def get_ref_cav_tuner(self):
+        self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
         return self.reference_cavity_tuner_value
+    
+    async def update_ref_cav_tuner(self):
+        value = await asyncio.get_event_loop().run_in_executor(None, self.get_ref_cav_tuner)
+        print(f"Tuner value updated to {value}")
 
     def update_etalon_lock_status(self):
         self.etalon_lock_status = self.laser.get_etalon_lock_status()
@@ -456,13 +486,14 @@ class LaserControl(ControlLoop):
 
     def start_scan(self, start, end, no_scans, time_per_scan):
         self.scan_targets = np.linspace(start, end, no_scans)
-        self.time_ps = time_per_scan
-        self.scan_time = time_per_scan
+        self.set_tps = time_per_scan
         self.state = 1
         self.scan = 1
         self.j = 0
         self.jmax = no_scans
         self.scan_progress = 0.
+        self.total_time = no_scans * time_per_scan
+        self.scan_restarted = True
         self.start_tweaking()
     
     def stop_scan(self):
@@ -473,12 +504,21 @@ class LaserControl(ControlLoop):
     def end_scan(self):
         self.scan = 0
         self.state = 0
-        self.scan_progress = 100.
+        self.scan_progress = self.total_time
     
     def _do_scan(self):
         try:
-            self.scan_progress += 1
-            if self.scan_time >= self.time_ps:
+            if self.scan_restarted:
+                self.scan_time = self.set_tps
+                self.scan_start_time = self.reader.get_time()
+                self.scan_restarted = False
+            else:
+                now = self.reader.get_time()
+                time_elapsed = now - self.scan_start_time
+                time_elapsed_ps = now - self.scan_step_start_time
+                self.scan_time += time_elapsed_ps
+                self.scan_progress = time_elapsed
+            if self.scan_time >= self.set_tps:
                 if self.j < self.jmax:
                     self.target = self.scan_targets[self.j]
                     self.init = 1
@@ -487,17 +527,15 @@ class LaserControl(ControlLoop):
                     self.j += 1
                 else: 
                     self.end_scan()
-            else:
-                self.scan_time += self.rate
-                print(self.scan_time)
-                #to convert rate to seconds
+            
+            #to convert rate to seconds
             print(f"progress:{self.j}, total:{self.jmax}")
         except IndexError:
             self.scan = 0
             self.state = 0
 
     def scan_update(self, new_time_ps):
-        self.time_ps = new_time_ps
+        self.set_tps = new_time_ps
     
     def pid_filter_control(self, filter: bool):
         #print(f"pid.setpoint={self.pid.setpoint}")
@@ -515,6 +553,7 @@ class LaserControl(ControlLoop):
         u = self.pid.update(self.wnum)
         tuning = float(self.reference_cavity_tuner_value) - u
         self.tune_reference_cavity(tuning)
+        self.reference_cavity_tuner_value = tuning
 
     def p_update(self, value):
         try:
@@ -548,6 +587,11 @@ class LaserControl(ControlLoop):
         # t0 = self.get_time()
         while self.is_tweaking:
             try:
+                self.update_tuner += 1
+                if self.update_tuner == 5:
+                    asyncio.run(self.update_ref_cav_tuner())
+                    self.update_tuner = 0
+
                 if self.scan == 1:
                     self._do_scan()
 
@@ -558,9 +602,15 @@ class LaserControl(ControlLoop):
                     if self.init == 1:
                         delta = self.target - self.wnum
                         delta *= self.conversion
-                        self.tune_reference_cavity(float(self.reference_cavity_tuner_value) - delta)
+                        tuning = float(self.reference_cavity_tuner_value) - delta
+                        self.tune_reference_cavity(tuning)
+                        self.reference_cavity_tuner_value = tuning
                         self.init = 0
                         self.pid.setpoint = self.target
+                        if self.scan == 1:
+                            self.scan_step_start_time = self.reader.get_time()
+                            if self.verbose:
+                                print(self.scan_step_start_time)
                         print("wavelength set")
                     else:
                         # Simple proportional control
@@ -573,8 +623,8 @@ class LaserControl(ControlLoop):
                 if self.state == 2:
                 #get conversion constant mode
                     self.do_conversion()
-
-                time.sleep(self.rate)
+                
+                time.sleep(0.2)
             except Exception as e:
                 if self.verbose:
                     print(f"Exception in tweaking the laser: {e}")
