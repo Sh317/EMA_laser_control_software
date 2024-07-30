@@ -278,14 +278,20 @@ def loop(plot, dataf_space):
     xtoPlot, ytoPlot = control_loop.get_df_to_plot()
     # ts, wn, ts_with_time, wn_with_time = control_loop.xDat, control_loop.yDat, control_loop.xDat_with_time, control_loop.yDat_with_time
     if xtoPlot and ytoPlot:
-        # Only use the last 'max_points' data points for plotting
-        fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(193, 28, 132, 1)')), layout=go.Layout(
+        fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(255,77,1, 1)')), layout=go.Layout(
             xaxis=dict(title="Time(s)"), yaxis=dict(title="Wavenumber (cm^-1)", exponentformat="none")
             ))
+        fig.update_xaxes(showgrid=True, gridwidth=1, griddash='dash', minor_griddash="dot", gridcolor='Blue')
+        #fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightPink')
+        if state.freq_lock_clicked or state.scan_button:
+            y_ref = control_loop.target
+            y_lower = y_ref - 0.00002
+            y_upper = y_ref + 0.00002
+            fig.add_hrect(y0=y_lower, y1=y_upper, line_width=0, fillcolor="LightPink", opacity=0.1)
         #fig = dataf.iplot(kind="scatter", title="Wavenumber VS Time", xTitle="Time(s)", yTitle="Wavenumber (cm^-1)", asFigure=True, mode="lines+markers", size=8, colors=["pink"])
         # fig.update_xaxes(exponentformat="none")
         # fig.update_yaxes(exponentformat="none")
-        plot.plotly_chart(fig)
+        plot.plotly_chart(fig, theme='streamlit', use_container_width=True)
     c_wnum = get_cwnum()
     dataf_space.metric(label="Current Wavenumber", value=c_wnum)
         # state.df_toSave = pd.DataFrame({'Time': ts_with_time, 'Wavenumber': wn_with_time})
@@ -351,6 +357,7 @@ def main():
     initialize_lock("etalon_lock", etalon_lock_status)
     initialize_lock("cavity_lock", cavity_lock_status)
     initialize_state('c_wnum', get_cwnum())
+    state.c_wnum = get_cwnum()
 
     with tab1:
         st.header("SolsTis Control")
@@ -388,7 +395,7 @@ def main():
         state.kd_enable = not kd_enable
 
         with pid1.form("PID Control", border=False):
-            kp = st.slider("Proportional Gain", min_value=0.0, max_value=100.0, value=40.0, step=0.1, format="%0.2f", key="kp", disabled=state.kp_enable)
+            kp = st.slider("Proportional Gain", min_value=0.0, max_value=100.0, value=control_loop.pid.kp, step=0.1, format="%0.2f", key="kp", disabled=state.kp_enable)
             ki = st.slider("Integral Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
             kd = st.slider("Derivative Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
             if st.form_submit_button("Update", on_click=pid_update):
@@ -439,7 +446,7 @@ def main():
             total_time = control_loop.total_time
             draw_progress_bar(total_time, scan_bar, scan_placeholder)
         loop(plot, dataf_space)
-        #print("a")
+        print(f"conversion:{control_loop.conversion}")
         time.sleep(0.1)
 
 

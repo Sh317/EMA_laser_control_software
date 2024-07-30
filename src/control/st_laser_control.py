@@ -38,7 +38,7 @@ class PIDController:
         self.previous_error = error
         self.previous_time = current_time
 
-        return output
+        return error, output
 
 
 class EMAServerReader:
@@ -232,13 +232,11 @@ class LaserControl(ControlLoop):
         self.ip_address = ip_address
         self.port = port    
         self.patient_laser_init()
+        self.old_wnum = 0.
         self.wnum = 0.
+        self.delta = 0.
         self.state = 0
         self.scan = 0
-        # self.xDat = np.array([])
-        # self.yDat = np.array([])
-        # self.xDat_with_time = []
-        # self.yDat_with_time = np.array([])
         self.target = 0.0
         self.scan_progress = 0.
         self.total_time = 0.
@@ -253,7 +251,7 @@ class LaserControl(ControlLoop):
         self.is_tweaking = False
         self.scan_restarted = False
         self.scan_start_time = 0.
-        self.pid = PIDController(kp=40., ki=0., kd=0., setpoint=self.target)######
+        self.pid = PIDController(kp=50., ki=0., kd=0., setpoint=self.target)######
         self.reader = EMAServerReader(pv_name=wavenumber_pv, reading_frequency=self.rate, saving_dir=None, verbose=True)
         #A list of commands to be sent to the laser 
         self.patient_setup_status()
@@ -368,6 +366,7 @@ class LaserControl(ControlLoop):
         return ts, wn
 
     def set_current_wnum(self):
+        self.old_wnum = self.wnum
         self.wnum = self.reader.get_read_value()
     
     def get_conversion(self):
@@ -548,8 +547,9 @@ class LaserControl(ControlLoop):
         self.set_tps = new_time_ps
     
     def wavelength_setter(self):
-        delta = self.target - self.wnum
-        delta *= self.conversion
+        delta = self.target - self.wnum #how much you would like to tune
+        self.delta = delta
+        delta *= 60
         tuning = self.reference_cavity_tuner_value - delta
         self.tune_reference_cavity(tuning)
         self.reference_cavity_tuner_value = tuning
@@ -562,6 +562,13 @@ class LaserControl(ControlLoop):
         if self.verbose:
             print("wavelength set")        
     
+    def _pid_control(self):
+        error, u = self.pid.update(self.wnum)
+        self.delta = error
+        tuning = float(self.reference_cavity_tuner_value) - u
+        self.tune_reference_cavity(tuning)
+        self.reference_cavity_tuner_value = tuning
+
     def pid_filter_control(self, filter: bool):
         #If filter set to True, then a 1MHZ window for the PID control will be enabled.
         if filter:
@@ -574,12 +581,6 @@ class LaserControl(ControlLoop):
         else:
             self._pid_control()
     
-    def _pid_control(self):
-        u = self.pid.update(self.wnum)
-        tuning = float(self.reference_cavity_tuner_value) - u
-        self.tune_reference_cavity(tuning)
-        self.reference_cavity_tuner_value = tuning
-
     def p_update(self, value):
         try:
             self.pid.kp = float(value)
@@ -608,11 +609,19 @@ class LaserControl(ControlLoop):
         self.tweaking_thread = threading.Thread(target=self._tweaking_loop, daemon=True)
         self.tweaking_thread.start()
 
+    def update_conversion(self):
+        conversion_change = 1
+        actual_delta = self.wnum - self.old_wnum
+        if actual_delta < self.delta: self.conversion += conversion_change
+        elif actual_delta > self.delta: self.conversion -= conversion_change
+        else: pass           
+
     def _tweaking_loop(self):
         # t0 = self.get_time()
         while self.is_tweaking:
             try:
                 self.set_current_wnum()
+                self.update_conversion()
                 self.update_tuner += 1
                 if self.update_tuner == 5:
                     before = self.reference_cavity_tuner_value
