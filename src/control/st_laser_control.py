@@ -253,7 +253,7 @@ class LaserControl(ControlLoop):
         self.is_tweaking = False
         self.scan_restarted = False
         self.scan_start_time = 0.
-        self.pid = PIDController(kp=50., ki=0., kd=0., setpoint=self.target)######
+        self.pid = PIDController(kp=40., ki=0., kd=0., setpoint=self.target)######
         self.reader = EMAServerReader(pv_name=wavenumber_pv, reading_frequency=self.rate, saving_dir=None, verbose=True)
         #A list of commands to be sent to the laser 
         self.patient_setup_status()
@@ -364,8 +364,8 @@ class LaserControl(ControlLoop):
         ts, wn = self.reader.get_plot_data()
         # if len(ts)>0 and len(wn)>0:
         #     print(ts[-1], wn[-1])
-        df_to_plot = pd.DataFrame({"Wavenumber (cm^-1)": wn}, index = ts)
-        return df_to_plot
+        # df_to_plot = pd.DataFrame({"Wavenumber (cm^-1)": wn}, index = ts)
+        return ts, wn
 
     def set_current_wnum(self):
         self.wnum = self.reader.get_read_value()
@@ -443,8 +443,9 @@ class LaserControl(ControlLoop):
     def unlock(self):
         self.state = 0
         self.scan = 0
-        self.clear_plot()
         self.stop_tweaking()
+        print("Unlock triggered")
+        self.clear_plot()
 
     def lock_etalon(self):
         self.laser.lock_etalon()
@@ -462,6 +463,8 @@ class LaserControl(ControlLoop):
         if self.reply is None:
             self.reply = "something"
             self.reply = self.laser.tune_reference_cavity(value, sync=False)
+            if self.verbose:
+                print("ref cavity tuned")
         
     def tune_etalon(self, value):
         self.laser.tune_etalon(value)
@@ -471,13 +474,19 @@ class LaserControl(ControlLoop):
         return self.etalon_tuner_value
 
     def get_ref_cav_tuner(self):
-        self.reference_cavity_tuner_value = self.laser.get_full_web_status()['cavity_tune']
+        self.reference_cavity_tuner_value = float(self.laser.get_full_web_status()['cavity_tune'])
         return self.reference_cavity_tuner_value
     
-    async def update_ref_cav_tuner(self):
-        before = self.reference_cavity_tuner_value
-        value = await asyncio.get_event_loop().run_in_executor(None, self.get_ref_cav_tuner)
-        print(f"Tuner value updated from {before} to {value}")
+    def update_ref_cav_tuner(self):
+        async def update_ref_tuner():
+            try:
+                before = self.reference_cavity_tuner_value
+                value = await asyncio.get_event_loop().run_in_executor(None, self.get_ref_cav_tuner)
+                print(f"Tuner value updated from {before} to {value}")
+            except Exception as e:
+                print("Error in updating reference cavity tuner value:{e}")
+        
+        asyncio.run(update_ref_tuner())
 
     def update_etalon_lock_status(self):
         self.etalon_lock_status = self.laser.get_etalon_lock_status()
@@ -511,13 +520,13 @@ class LaserControl(ControlLoop):
         try:
             if self.scan_restarted:
                 self.scan_time = self.set_tps
-                self.scan_start_time = self.reader.get_time()
+                self.scan_start_time = time.time()
                 self.scan_restarted = False
             else:
-                now = self.reader.get_time()
+                now = time.time()
                 time_elapsed = now - self.scan_start_time
                 time_elapsed_ps = now - self.scan_step_start_time
-                self.scan_time += time_elapsed_ps
+                self.scan_time = time_elapsed_ps
                 self.scan_progress = time_elapsed
             if self.scan_time >= self.set_tps:
                 if self.j < self.jmax:
@@ -538,8 +547,23 @@ class LaserControl(ControlLoop):
     def scan_update(self, new_time_ps):
         self.set_tps = new_time_ps
     
+    def wavelength_setter(self):
+        delta = self.target - self.wnum
+        delta *= self.conversion
+        tuning = self.reference_cavity_tuner_value - delta
+        self.tune_reference_cavity(tuning)
+        self.reference_cavity_tuner_value = tuning
+        self.init = 0
+        self.pid.setpoint = self.target
+        if self.scan == 1:
+            self.scan_step_start_time = time.time()
+            if self.verbose:
+                print(f"A new scan step starts at {self.scan_step_start_time}")
+        if self.verbose:
+            print("wavelength set")        
+    
     def pid_filter_control(self, filter: bool):
-        #print(f"pid.setpoint={self.pid.setpoint}")
+        #If filter set to True, then a 1MHZ window for the PID control will be enabled.
         if filter:
             lower = self.target - 0.00002
             upper = self.target + 0.00002
@@ -588,10 +612,13 @@ class LaserControl(ControlLoop):
         # t0 = self.get_time()
         while self.is_tweaking:
             try:
+                self.set_current_wnum()
                 self.update_tuner += 1
                 if self.update_tuner == 5:
-                    asyncio.run(self.update_ref_cav_tuner())
+                    before = self.reference_cavity_tuner_value
+                    now = self.get_ref_cav_tuner()
                     self.update_tuner = 0
+                    print(f"Ref cav updated from {before} to {now}")
 
                 if self.scan == 1:
                     self._do_scan()
@@ -601,18 +628,7 @@ class LaserControl(ControlLoop):
                     #print("locked")
                     #set the wavelength to the target
                     if self.init == 1:
-                        delta = self.target - self.wnum
-                        delta *= self.conversion
-                        tuning = float(self.reference_cavity_tuner_value) - delta
-                        self.tune_reference_cavity(tuning)
-                        self.reference_cavity_tuner_value = tuning
-                        self.init = 0
-                        self.pid.setpoint = self.target
-                        if self.scan == 1:
-                            self.scan_step_start_time = self.reader.get_time()
-                            if self.verbose:
-                                print(self.scan_step_start_time)
-                        print("wavelength set")
+                        self.wavelength_setter()
                     else:
                         # Simple proportional control
                         self.pid_filter_control(filter=False)
@@ -620,20 +636,24 @@ class LaserControl(ControlLoop):
                         # print(f"current:{self.wnum}")
                         # print(f"correction:{u}")
                         # print("wavelength in control")
-                    
+                
                 if self.state == 2:
                 #get conversion constant mode
                     self.do_conversion()
-                
+                if self.verbose:
+                    print("Tweaking loop in progress")
                 time.sleep(0.2)
             except Exception as e:
                 if self.verbose:
                     print(f"Exception in tweaking the laser: {e}")
+                time.sleep(1)
 
     def stop_tweaking(self):
         self.is_tweaking = False
+        print("Here")
         if self.tweaking_thread:
             self.tweaking_thread.join()
+            print("tweaking shoud be caught")
             if self.verbose:
                 print("Tweaking thread caught")
 

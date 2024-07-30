@@ -7,6 +7,7 @@ import traceback
 import asyncio
 import numpy as np
 import plotly
+import plotly.graph_objects as go
 import cufflinks as cf
 import pandas as pd
 
@@ -166,7 +167,7 @@ def end_scan(placeholder):
     state.scan_button = False
     state.scan_status = ":green[_Scan Finished_]"
     state.scan = 0
-    draw_scanning(placeholder)
+    draw_scanning(placeholder, "scan_complete")
     st.toast("Scan Completed!")
 
 def scan_update():
@@ -271,24 +272,22 @@ def control_loop_update():
     state.control_loop = control_loop
     control_loop.update()
 
-def loop(plot, dataf_space, sleep_time):
+def loop(plot, dataf_space):
 
     # Time series plot
-    dataf = control_loop.get_df_to_plot()
+    xtoPlot, ytoPlot = control_loop.get_df_to_plot()
     # ts, wn, ts_with_time, wn_with_time = control_loop.xDat, control_loop.yDat, control_loop.xDat_with_time, control_loop.yDat_with_time
-    if not dataf.empty:
+    if xtoPlot and ytoPlot:
         # Only use the last 'max_points' data points for plotting
-        # ts = ts[-state.max_points:]
-        # wn = wn[-state.max_points:]
-
-        # dataf = pd.DataFrame({"Wavenumber (cm^-1)": wn}, index=ts)
-        fig = dataf.iplot(kind="scatter", title="Wavenumber VS Time", xTitle="Time(s)", yTitle="Wavenumber (cm^-1)", asFigure=True, mode="lines+markers", size=8, colors=["pink"])
-        fig.update_xaxes(exponentformat="none")
-        fig.update_yaxes(exponentformat="none")
+        fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(193, 28, 132, 1)')), layout=go.Layout(
+            xaxis=dict(title="Time(s)"), yaxis=dict(title="Wavenumber (cm^-1)", exponentformat="none")
+            ))
+        #fig = dataf.iplot(kind="scatter", title="Wavenumber VS Time", xTitle="Time(s)", yTitle="Wavenumber (cm^-1)", asFigure=True, mode="lines+markers", size=8, colors=["pink"])
+        # fig.update_xaxes(exponentformat="none")
+        # fig.update_yaxes(exponentformat="none")
         plot.plotly_chart(fig)
     c_wnum = get_cwnum()
     dataf_space.metric(label="Current Wavenumber", value=c_wnum)
-    time.sleep(sleep_time)
         # state.df_toSave = pd.DataFrame({'Time': ts_with_time, 'Wavenumber': wn_with_time})
     # if state.backup_enable:
     #     write_to_file(state.backup_name, state.backup_dir, ts_with_time[-1], wn_with_time[-1])
@@ -315,7 +314,7 @@ def scan_settings():
             mode = "Frequency"
             unit1 = "GHz"
             unit2 = "MHz"
-            start_wnum_display, end_wnum_display, scan_range_display, wnum_per_scan = start_wnum * wnum_to_freq, end_wnum * wnum_to_freq, round(scan_range * wnum_to_freq * 1000, 7), round(wnum_per_scan * wnum_to_freq *1000, 7)
+            start_wnum_display, end_wnum_display, scan_range_display, wnum_per_scan = round(start_wnum * wnum_to_freq,2), round(end_wnum * wnum_to_freq,2), round(scan_range * wnum_to_freq * 1000, 7), round(wnum_per_scan * wnum_to_freq *1000, 7)
         else:
             mode = "Wavenumber"
             unit1, unit2 = "/cm", "/cm"
@@ -333,12 +332,12 @@ def draw_cavity():
     ll2.button(label=str(state.cavity_lock), on_click=lock_cavity, key="cavity_lock_button")
     ll3.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.get_ref_cav_tuner()), 5), format="%0.5f", on_change=tune_ref_cav)
 
-def draw_scanning(placeholder):
+def draw_scanning(placeholder, key):
     button1, button2 = placeholder.columns([1, 1])
-    button1.button("Start Scan", on_click=start_scan, disabled=state.scan_button)
-    button2.button("Stop Scan", on_click=stop_scan, type="primary", disabled=not state.scan_button)
+    button1.button("Start Scan", on_click=start_scan, disabled=state.scan_button, key=f"start_{key}")
+    button2.button("Stop Scan", on_click=stop_scan, type="primary", disabled=not state.scan_button, key=f"stop_{key}")
     button1.markdown(state.scan_status)
-    button2.button("Update Time per Step", on_click=scan_update, disabled=not state.scan_button)
+    button2.button("Update Time per Step", on_click=scan_update, disabled=not state.scan_button, key=f"update_tps_{key}")
 
 def main():
     patient_netconnect()
@@ -389,7 +388,7 @@ def main():
         state.kd_enable = not kd_enable
 
         with pid1.form("PID Control", border=False):
-            kp = st.slider("Proportional Gain", min_value=0.0, max_value=100.0, value=50.0, step=0.1, format="%0.2f", key="kp", disabled=state.kp_enable)
+            kp = st.slider("Proportional Gain", min_value=0.0, max_value=100.0, value=40.0, step=0.1, format="%0.2f", key="kp", disabled=state.kp_enable)
             ki = st.slider("Integral Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
             kd = st.slider("Derivative Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
             if st.form_submit_button("Update", on_click=pid_update):
@@ -398,7 +397,7 @@ def main():
     with tab2:
         scan_settings()
         scan_placeholder = st.empty()
-        draw_scanning(scan_placeholder)
+        draw_scanning(scan_placeholder, "create")
         scan_bar = st.progress(0., text="Scan Progress")
     
     with tab3: 
@@ -439,7 +438,9 @@ def main():
         if state.scan == 1:
             total_time = control_loop.total_time
             draw_progress_bar(total_time, scan_bar, scan_placeholder)
-        loop(plot, dataf_space, 0.1)
+        loop(plot, dataf_space)
+        #print("a")
+        time.sleep(0.1)
 
 
 if __name__ == "__main__":
