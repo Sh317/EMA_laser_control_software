@@ -24,14 +24,20 @@ class PIDController:
         self.integral = 0
         self.previous_error = 0
         self.previous_time = time.time()
+        self.first_update_call = True
 
     def update(self, current_value):
         current_time = time.time()
-        delta_time = current_time - self.previous_time
         error = self.setpoint - current_value
+        if self.first_update_call: 
+            self.integral = 0.
+            derivative = 0.
+            self.first_update_call = False
+        else:
+            delta_time = current_time - self.previous_time
+            self.integral += error * delta_time
+            derivative = (error - self.previous_error) / delta_time
 
-        self.integral += error * delta_time
-        derivative = (error - self.previous_error) / delta_time
 
         output = (self.kp * error) + (self.ki * self.integral) + (self.kd * derivative)
 
@@ -433,11 +439,15 @@ class LaserControl(ControlLoop):
     
     def lock(self, value):
         self.state = 1
-        print(f"lock function called with state being {self.state}")
+        if self.verbose:
+            print(f"lock function called with state being {self.state}")
         self.target = value
         self.init = 1
         self.clear_plot()
-        self.start_tweaking()
+        if self.tweaking_thread is None:
+            self.start_tweaking()
+            if self.verbose:
+                print("One tweaking thread initiated for the wavelength lock")
 
     def unlock(self):
         self.state = 0
@@ -461,9 +471,9 @@ class LaserControl(ControlLoop):
     def tune_reference_cavity(self, value):
         if self.reply is None:
             self.reply = "something"
-            self.reply = self.laser.tune_reference_cavity(value, sync=False)
-            if self.verbose:
-                print("ref cavity tuned")
+            self.reply = self.laser.tune_reference_cavity(value, sync=True)
+            # if self.verbose:
+            #     print("ref cavity tuned")
         
     def tune_etalon(self, value):
         self.laser.tune_etalon(value)
@@ -472,8 +482,19 @@ class LaserControl(ControlLoop):
     def get_etalon_tuner(self):
         return self.etalon_tuner_value
 
-    def get_ref_cav_tuner(self):
-        self.reference_cavity_tuner_value = float(self.laser.get_full_web_status()['cavity_tune'])
+    def get_ref_cav_tuner(self, tryouts=2):
+        tries = 0
+        for tries in range(tryouts):
+            try:
+                self.reference_cavity_tuner_value = float(self.laser.get_full_web_status()['cavity_tune'])
+                break
+            except Exception as e:
+                print(f"Error in getting reference cavity tuner value: {e}")
+                print(f"Tryouts: {tries}")
+                if tries == 2:
+                    raise ConnectionRefusedError
+                tries += 1
+                time.sleep(1)
         return self.reference_cavity_tuner_value
     
     def update_ref_cav_tuner(self):
@@ -481,11 +502,11 @@ class LaserControl(ControlLoop):
             try:
                 before = self.reference_cavity_tuner_value
                 value = await asyncio.get_event_loop().run_in_executor(None, self.get_ref_cav_tuner)
-                print(f"Tuner value updated from {before} to {value}")
             except Exception as e:
                 print(f"Error in updating reference cavity tuner value:{e}")
         
         asyncio.run(update_ref_tuner())
+        return self.reference_cavity_tuner_value
 
     def update_etalon_lock_status(self):
         self.etalon_lock_status = self.laser.get_etalon_lock_status()
@@ -552,9 +573,11 @@ class LaserControl(ControlLoop):
         delta *= self.conversion
         tuning = self.reference_cavity_tuner_value - delta
         self.tune_reference_cavity(tuning)
+        print(f"setter tuning={delta}")
         self.reference_cavity_tuner_value = tuning
         self.init = 0
         self.pid.setpoint = self.target
+        self.pid.first_update_call = True
         if self.scan == 1:
             self.scan_step_start_time = time.time()
             if self.verbose:
@@ -565,6 +588,7 @@ class LaserControl(ControlLoop):
     def _pid_control(self):
         error, u = self.pid.update(self.wnum)
         #self.delta = error
+        print(f"tuning={u}")
         tuning = float(self.reference_cavity_tuner_value) - u
         self.tune_reference_cavity(tuning)
         self.reference_cavity_tuner_value = tuning
@@ -629,7 +653,7 @@ class LaserControl(ControlLoop):
                     self.update_tuner += 1
                     if self.update_tuner == 5:
                         before = self.reference_cavity_tuner_value
-                        now = self.get_ref_cav_tuner()
+                        now = self.update_ref_cav_tuner()
                         self.update_tuner = 0
                         print(f"Ref cav updated from {before} to {now}")
 
@@ -646,6 +670,7 @@ class LaserControl(ControlLoop):
                             self.update_conversion()
                         else:
                             # Simple proportional control
+                            print(self.wnum)
                             self.pid_filter_control(filter=False)
                             # print(f"target:{self.target}")
                             # print(f"current:{self.wnum}")
@@ -655,15 +680,14 @@ class LaserControl(ControlLoop):
                     if self.state == 2:
                     #get conversion constant mode
                         self.do_conversion()
-                    if self.verbose:
-                        print("Tweaking loop in progress")
-                    time.sleep(0.2)
+                    # if self.verbose:
+                    #     print("Tweaking loop in progress")
+                    time.sleep(0.1)
                     break
                 except Exception as e:
                     if self.verbose:
                         print(f"{t}th trial. Exception in tweaking the laser: {e}")
                     if t == 3:
-                        self.stop_tweaking()
                         raise ConnectionRefusedError
                     time.sleep(1)
 
@@ -671,6 +695,7 @@ class LaserControl(ControlLoop):
         self.is_tweaking = False
         if self.tweaking_thread:
             self.tweaking_thread.join()
+            self.tweaking_thread = None
             if self.verbose:
                 print("Tweaking thread caught")
 

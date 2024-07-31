@@ -43,10 +43,7 @@ def initialize_state(key, default_value):
 
 def initialize_lock(key, condition):
     if key not in st.session_state:
-        if condition:
-            st.session_state[key] = "🔐"
-        else:
-            st.session_state[key] = "🔓"
+        get_lock_icon(key, condition)
 
 initialize_state("netcon_tries", 0)
 initialize_state("freq_lock_clicked", False)
@@ -100,6 +97,12 @@ def get_cavity_lock_status():
     c_status = control_loop.reference_cavity_lock_status
     assert isinstance(c_status, str) and c_status in ["on", "off"], f"Invalid cavity lock status: {c_status}"
     return True if  c_status == "on" else False
+
+def get_lock_icon(key, condition):
+    if condition:
+        st.session_state[key] = "🔐"
+    else:
+        st.session_state[key] = "🔓"   
 
 def lock_etalon():
     if get_etalon_lock_status():
@@ -189,6 +192,9 @@ def get_rate():
 def get_cwnum():
     return control_loop.get_current_wnum()
 
+def get_pid():
+    return control_loop.pid.kp, control_loop.pid.ki, control_loop.pid.kd
+
 def write_to_file(filename, filepath, x_data, y_data):
     name = f"{filename}.csv"
     path = os.path.join(filepath, name)
@@ -214,7 +220,6 @@ def save_data(filename, filedir):
     except Exception as e:
         st.error(f"**Failed to save file due to an error:** {e}")
     
-
 @st.experimental_dialog("Save As")
 def save_file(data):
     filename = st.text_input("File Name:", placeholder="Enter the file name...")
@@ -246,6 +251,12 @@ def stop_backup_saving():
     control_loop.stop_backup_saving()
     state.backup_enable = False
 
+def update_values():
+    state.c_wnum = get_cwnum()
+    state.cavity_tuner_value = round(float(control_loop.get_ref_cav_tuner()), 5)
+    state.etalon_tuner_value = round(float(control_loop.get_etalon_tuner()), 5)
+    st.rerun()
+    
 def calculate_total_points(time_ps, rate, no_steps):
     total_points = float(time_ps * no_steps)
     total_time = time_ps * no_steps
@@ -360,9 +371,13 @@ def main():
     initialize_lock("etalon_lock", etalon_lock_status)
     initialize_lock("cavity_lock", cavity_lock_status)
     initialize_state('c_wnum', get_cwnum())
-    state.c_wnum = get_cwnum()
     initialize_state("cavity_tuner_value", round(float(control_loop.get_ref_cav_tuner()), 5))
     initialize_state("etalon_tuner_value", round(float(control_loop.get_etalon_tuner()), 5))
+
+    kp, ki, kd = get_pid()
+    initialize_state("kp_default", kp)
+    initialize_state("ki_default", ki)
+    initialize_state("kd_default", kd)
 
     with tab1:
         st.header("SolsTis Control")
@@ -400,9 +415,9 @@ def main():
         state.kd_enable = not kd_enable
 
         with pid1.form("PID Control", border=False):
-            kp = st.slider("Proportional Gain", min_value=0.0, max_value=100.0, value=control_loop.pid.kp, step=0.1, format="%0.2f", key="kp", disabled=state.kp_enable)
-            ki = st.slider("Integral Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
-            kd = st.slider("Derivative Gain", min_value=0.0, max_value=10.0, value=0.0, step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
+            kp = st.slider("Proportional Gain", min_value=0.0, max_value=100.0, value=state.kp_default, step=0.1, format="%0.2f", key="kp", disabled=state.kp_enable)
+            ki = st.slider("Integral Gain", min_value=0.0, max_value=10.0, value=state.ki_default, step=0.1, format="%0.2f", key="ki", disabled=state.ki_enable)
+            kd = st.slider("Derivative Gain", min_value=0.0, max_value=10.0, value=state.kd_default, step=0.1, format="%0.2f", key="kd", disabled=state.kd_enable)
             if st.form_submit_button("Update", on_click=pid_update):
                 st.toast("PID Control Updated!")
 
@@ -433,13 +448,15 @@ def main():
             st.markdown(f":blue[_Data stopped saving to{state.dialog_dir}_]")
 
     plot = st.empty()
-    place1, place2, place3, place4, place5 = st.columns([4, 3, 1, 1, 1], vertical_alignment="center")
+    place1, place2, place3, place4, place5, place6 = st.columns([4, 3, 1, 1, 1, 1], vertical_alignment="center")
     dataf_space = place1.empty()
     reading_rate = place2.empty()
-    place3.button("Clear Plot", on_click=clear_plot)
-    if place4.button("Rerun", type="primary"):
+    if place3.button("Update Value", help="Trigger rerun to update lock status/values in the input"):
+        update_values()
+    place4.button("Clear Plot", on_click=clear_plot)
+    if place5.button("Rerun", type="primary"):
         st.rerun()
-    place5.button("Stop Child Thread(s)", on_click=control_loop.stop)
+    place6.button("Stop Child Thread(s)", on_click=control_loop.stop)
 
     while True:
         reading_rate.metric(label="Reading Rate (s)", value=sleep_time)
