@@ -241,13 +241,15 @@ def save_file(data):
         clear_data()
         st.rerun()
 
-def start_backup_saving(name, path):
-    filename = f"{name}.csv"
-    filepath = os.path.join(path, filename)
-    control_loop.start_backup_saving(filepath)
-    state.backup_enable = True
+def start_saving(name, path):
+    if state.dialog_dir:
+        filename = f"{name}.csv"
+        filepath = os.path.join(path, filename)
+        control_loop.start_backup_saving(filepath)
+        state.backup_enable = True
 
-def stop_backup_saving():
+
+def stop_saving():
     control_loop.stop_backup_saving()
     state.backup_enable = False
 
@@ -431,21 +433,23 @@ def main():
         backup_name = st.text_input("File Name:", placeholder="Enter the file name...")
         #backup_dir = st.text_input("File path:", placeholder="Enter the full path...")
         col1, col2 = st.columns([1.5, 4], vertical_alignment="bottom")
+        status_msg = col2.empty()
+        stop_button = col2.empty()
         if col1.button("Select Directory"):
             directory = open_directory_dialog()
             if directory:
-                col2.write(f"Selected directory: {directory}")
+                status_msg.markdown(f"Selected directory: _{directory}_")
                 state.dialog_dir = directory
             else:
-                col2.write("No directory selected.")
-        if col1.button("Start Saving Data", disabled = state.backup_enable):
+                status_msg.markdown(":red[_No directory selected._]")
+        if col1.button("Start Saving Data", disabled = state.backup_enable, on_click=start_saving, args=(backup_name, state.dialog_dir,)):
             if state.dialog_dir:
-                start_backup_saving(backup_name, state.dialog_dir)
-                st.markdown(f":green[_Data automatically being saved to {state.dialog_dir}_]")
-            else: st.markdown(f":red[_No filename/directory specified._]")
-        if col2.button("Stop Saving Data", disabled = not state.backup_enable):
-            stop_backup_saving()
-            st.markdown(f":blue[_Data stopped saving to{state.dialog_dir}_]")
+                status_msg.markdown(f":green[_Data automatically being saved to {state.dialog_dir}_]")
+            else: status_msg.markdown(f":red[_No filename/directory specified._]")
+        if stop_button.button("Stop Saving Data", disabled = not state.backup_enable, on_click=stop_saving):
+            status_msg.markdown(f":blue[_Data stopped saving to {state.dialog_dir}_]")
+            state.dialog_dir = None
+
 
     plot = st.empty()
     place1, place2, place3, place4, place5, place6 = st.columns([4, 3, 1, 1, 1, 1], vertical_alignment="center")

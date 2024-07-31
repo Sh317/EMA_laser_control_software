@@ -30,14 +30,12 @@ class PIDController:
         current_time = time.time()
         error = self.setpoint - current_value
         if self.first_update_call: 
-            self.integral = 0.
-            derivative = 0.
             self.first_update_call = False
+            derivative = 0.
         else:
             delta_time = current_time - self.previous_time
             self.integral += error * delta_time
             derivative = (error - self.previous_error) / delta_time
-
 
         output = (self.kp * error) + (self.ki * self.integral) + (self.kd * derivative)
 
@@ -45,7 +43,22 @@ class PIDController:
         self.previous_time = current_time
 
         return error, output
+    
+    def new_loop(self):
+        self.first_update_call = True
+        self.integral = 0.
+    
+    def update_kp(self, new_value):
+        self.kp = new_value 
 
+    def update_ki(self, new_value):
+        self.ki = new_value 
+
+    def update_kd(self, new_value):
+        self.kd = new_value 
+    
+    def update_setpoint(self, new_value):
+        self.setpoint = new_value
 
 class EMAServerReader:
     def __init__(self, pv_name: str, saving_dir: str = None, reading_frequency: float = 0.1,
@@ -472,8 +485,8 @@ class LaserControl(ControlLoop):
         if self.reply is None:
             self.reply = "something"
             self.reply = self.laser.tune_reference_cavity(value, sync=True)
-            # if self.verbose:
-            #     print("ref cavity tuned")
+            if self.verbose:
+                print("ref cavity tuned")
         
     def tune_etalon(self, value):
         self.laser.tune_etalon(value)
@@ -576,8 +589,9 @@ class LaserControl(ControlLoop):
         print(f"setter tuning={delta}")
         self.reference_cavity_tuner_value = tuning
         self.init = 0
-        self.pid.setpoint = self.target
-        self.pid.first_update_call = True
+        self.pid.update_setpoint(self.target)
+        #self.pid.setpoint = self.target
+        self.pid.new_loop()
         if self.scan == 1:
             self.scan_step_start_time = time.time()
             if self.verbose:
@@ -598,8 +612,8 @@ class LaserControl(ControlLoop):
         if filter:
             lower = self.target - 0.00002
             upper = self.target + 0.00002
-            if self.wnum >= lower and self.current <= upper:
-                pass
+            if self.wnum >= lower and self.wnum <= upper:
+                self.pid.new_loop()
             else: 
                 self._pid_control()
         else:
@@ -607,21 +621,21 @@ class LaserControl(ControlLoop):
     
     def p_update(self, value):
         try:
-            self.pid.kp = float(value)
+            self.pid.update_kp(float(value))
         except ValueError:
-            self.pid.kp = 0
+            raise
 
     def i_update(self, value):
         try:
-            self.pid.ki = float(value)
+            self.pid.update_ki(float(value))
         except ValueError:
-            self.pid.ki = 0
+            raise
     
     def d_update(self, value):
         try:
-            self.pid.kd = float(value)
+            self.pid.update_kd(float(value))
         except ValueError:
-            self.pid.kd = 0
+            raise
     
     def start_tweaking(self):
         print(f"Starting tweaking {self.laser}")
@@ -670,8 +684,7 @@ class LaserControl(ControlLoop):
                             self.update_conversion()
                         else:
                             # Simple proportional control
-                            print(self.wnum)
-                            self.pid_filter_control(filter=False)
+                            self.pid_filter_control(filter=True)
                             # print(f"target:{self.target}")
                             # print(f"current:{self.wnum}")
                             # print(f"correction:{u}")
