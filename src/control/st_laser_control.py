@@ -251,7 +251,7 @@ class LaserControl(ControlLoop):
         self.is_tweaking = False
         self.scan_restarted = False
         self.scan_start_time = 0.
-        self.pid = PIDController(kp=50., ki=0., kd=0., setpoint=self.target)######
+        self.pid = PIDController(kp=40., ki=0., kd=0., setpoint=self.target)######
         self.reader = EMAServerReader(pv_name=wavenumber_pv, reading_frequency=self.rate, saving_dir=None, verbose=True)
         #A list of commands to be sent to the laser 
         self.patient_setup_status()
@@ -483,7 +483,7 @@ class LaserControl(ControlLoop):
                 value = await asyncio.get_event_loop().run_in_executor(None, self.get_ref_cav_tuner)
                 print(f"Tuner value updated from {before} to {value}")
             except Exception as e:
-                print("Error in updating reference cavity tuner value:{e}")
+                print(f"Error in updating reference cavity tuner value:{e}")
         
         asyncio.run(update_ref_tuner())
 
@@ -549,7 +549,7 @@ class LaserControl(ControlLoop):
     def wavelength_setter(self):
         delta = self.target - self.wnum #how much you would like to tune
         self.delta = delta
-        delta *= 60
+        delta *= self.conversion
         tuning = self.reference_cavity_tuner_value - delta
         self.tune_reference_cavity(tuning)
         self.reference_cavity_tuner_value = tuning
@@ -564,7 +564,7 @@ class LaserControl(ControlLoop):
     
     def _pid_control(self):
         error, u = self.pid.update(self.wnum)
-        self.delta = error
+        #self.delta = error
         tuning = float(self.reference_cavity_tuner_value) - u
         self.tune_reference_cavity(tuning)
         self.reference_cavity_tuner_value = tuning
@@ -612,57 +612,65 @@ class LaserControl(ControlLoop):
     def update_conversion(self):
         conversion_change = 1
         actual_delta = self.wnum - self.old_wnum
-        if actual_delta < self.delta: self.conversion += conversion_change
-        elif actual_delta > self.delta: self.conversion -= conversion_change
-        else: pass           
+        if abs(actual_delta) < abs(self.delta): self.conversion += conversion_change
+        elif abs(actual_delta) > abs(self.delta): self.conversion -= conversion_change
+        else: pass
+        if self.conversion > 90:
+            raise ValueError           
+        print(f"conversion updated to {self.conversion}")
 
     def _tweaking_loop(self):
         # t0 = self.get_time()
         while self.is_tweaking:
-            try:
-                self.set_current_wnum()
-                self.update_conversion()
-                self.update_tuner += 1
-                if self.update_tuner == 5:
-                    before = self.reference_cavity_tuner_value
-                    now = self.get_ref_cav_tuner()
-                    self.update_tuner = 0
-                    print(f"Ref cav updated from {before} to {now}")
+            for t in range(4):
+                try:
+                    self.set_current_wnum()
 
-                if self.scan == 1:
-                    self._do_scan()
+                    self.update_tuner += 1
+                    if self.update_tuner == 5:
+                        before = self.reference_cavity_tuner_value
+                        now = self.get_ref_cav_tuner()
+                        self.update_tuner = 0
+                        print(f"Ref cav updated from {before} to {now}")
 
-                if self.state == 1:
-                #lock-in the wavelength of laser mode
-                    #print("locked")
-                    #set the wavelength to the target
-                    if self.init == 1:
-                        self.wavelength_setter()
-                    else:
-                        # Simple proportional control
-                        self.pid_filter_control(filter=False)
-                        # print(f"target:{self.target}")
-                        # print(f"current:{self.wnum}")
-                        # print(f"correction:{u}")
-                        # print("wavelength in control")
-                
-                if self.state == 2:
-                #get conversion constant mode
-                    self.do_conversion()
-                if self.verbose:
-                    print("Tweaking loop in progress")
-                time.sleep(0.2)
-            except Exception as e:
-                if self.verbose:
-                    print(f"Exception in tweaking the laser: {e}")
-                time.sleep(1)
+                    if self.scan == 1:
+                        self._do_scan()
+
+                    if self.state == 1:
+                    #lock-in the wavelength of laser mode
+                        #print("locked")
+                        #set the wavelength to the target
+                        if self.init == 1:
+                            self.wavelength_setter()
+                            self.set_current_wnum()
+                            self.update_conversion()
+                        else:
+                            # Simple proportional control
+                            self.pid_filter_control(filter=False)
+                            # print(f"target:{self.target}")
+                            # print(f"current:{self.wnum}")
+                            # print(f"correction:{u}")
+                            # print("wavelength in control")
+                    
+                    if self.state == 2:
+                    #get conversion constant mode
+                        self.do_conversion()
+                    if self.verbose:
+                        print("Tweaking loop in progress")
+                    time.sleep(0.2)
+                    break
+                except Exception as e:
+                    if self.verbose:
+                        print(f"{t}th trial. Exception in tweaking the laser: {e}")
+                    if t == 3:
+                        self.stop_tweaking()
+                        raise ConnectionRefusedError
+                    time.sleep(1)
 
     def stop_tweaking(self):
         self.is_tweaking = False
-        print("Here")
         if self.tweaking_thread:
             self.tweaking_thread.join()
-            print("tweaking shoud be caught")
             if self.verbose:
                 print("Tweaking thread caught")
 
@@ -677,4 +685,5 @@ class LaserControl(ControlLoop):
     
     def stop(self):
         self.reader.stop_reading()
+        self.stop_tweaking()
         pass

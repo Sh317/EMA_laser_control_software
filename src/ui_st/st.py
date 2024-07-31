@@ -273,9 +273,13 @@ def control_loop_update():
     control_loop.update()
 
 def loop(plot, dataf_space):
-
+    try:
+        xtoPlot, ytoPlot = control_loop.get_df_to_plot()
+        control_loop_update()
+        c_wnum = get_cwnum()
+    except Exception as e:
+        error_page("Unable to update laser information.", e)
     # Time series plot
-    xtoPlot, ytoPlot = control_loop.get_df_to_plot()
     # ts, wn, ts_with_time, wn_with_time = control_loop.xDat, control_loop.yDat, control_loop.xDat_with_time, control_loop.yDat_with_time
     if xtoPlot and ytoPlot:
         fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(255,77,1, 1)')), layout=go.Layout(
@@ -287,12 +291,11 @@ def loop(plot, dataf_space):
             y_ref = control_loop.target
             y_lower = y_ref - 0.00002
             y_upper = y_ref + 0.00002
-            fig.add_hrect(y0=y_lower, y1=y_upper, line_width=0, fillcolor="LightPink", opacity=0.1)
+            fig.add_hrect(y0=y_lower, y1=y_upper, line_width=0, fillcolor="LightPink", opacity=0.5)
         #fig = dataf.iplot(kind="scatter", title="Wavenumber VS Time", xTitle="Time(s)", yTitle="Wavenumber (cm^-1)", asFigure=True, mode="lines+markers", size=8, colors=["pink"])
         # fig.update_xaxes(exponentformat="none")
         # fig.update_yaxes(exponentformat="none")
         plot.plotly_chart(fig, theme='streamlit', use_container_width=True)
-    c_wnum = get_cwnum()
     dataf_space.metric(label="Current Wavenumber", value=c_wnum)
         # state.df_toSave = pd.DataFrame({'Time': ts_with_time, 'Wavenumber': wn_with_time})
     # if state.backup_enable:
@@ -336,7 +339,7 @@ def draw_cavity():
     ll1, ll2, ll3 = st.columns([1, 1, 3], vertical_alignment="center")
     ll1.write("**Cavity**")
     ll2.button(label=str(state.cavity_lock), on_click=lock_cavity, key="cavity_lock_button")
-    ll3.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=round(float(control_loop.get_ref_cav_tuner()), 5), format="%0.5f", on_change=tune_ref_cav)
+    ll3.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=state.cavity_tuner_value, step=0.0001, format="%0.4f", on_change=tune_ref_cav)
 
 def draw_scanning(placeholder, key):
     button1, button2 = placeholder.columns([1, 1])
@@ -358,13 +361,15 @@ def main():
     initialize_lock("cavity_lock", cavity_lock_status)
     initialize_state('c_wnum', get_cwnum())
     state.c_wnum = get_cwnum()
+    initialize_state("cavity_tuner_value", round(float(control_loop.get_ref_cav_tuner()), 5))
+    initialize_state("etalon_tuner_value", round(float(control_loop.get_etalon_tuner()), 5))
 
     with tab1:
         st.header("SolsTis Control")
         l1, l2, l3 = st.columns([1, 1, 3], vertical_alignment="center")
         l1.write("**Etalon**")
         l2.button(label=str(state.etalon_lock), on_click=lock_etalon, key="etalon_lock_button")
-        l3.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=round(float(control_loop.get_etalon_tuner()), 5), format="%0.5f", on_change=tune_etalon, disabled=etalon_lock_status)
+        l3.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=state.etalon_tuner_value, format="%0.5f", on_change=tune_etalon, disabled=etalon_lock_status)
 
         draw_cavity()
 
@@ -434,19 +439,14 @@ def main():
     place3.button("Clear Plot", on_click=clear_plot)
     if place4.button("Rerun", type="primary"):
         st.rerun()
-    place5.button("Stop Reading Thread", on_click=control_loop.stop)
+    place5.button("Stop Child Thread(s)", on_click=control_loop.stop)
 
     while True:
-        try:
-            control_loop_update()
-        except Exception as e:
-            error_page("Unable to update laser information.", e)
         reading_rate.metric(label="Reading Rate (s)", value=sleep_time)
         if state.scan == 1:
             total_time = control_loop.total_time
             draw_progress_bar(total_time, scan_bar, scan_placeholder)
         loop(plot, dataf_space)
-        print(f"conversion:{control_loop.conversion}")
         time.sleep(0.1)
 
 
