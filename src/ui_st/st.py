@@ -11,13 +11,8 @@ import plotly.graph_objects as go
 import cufflinks as cf
 import pandas as pd
 
-setattr(plotly.offline, "__PLOTLY_OFFLINE_INITIALIZED", True)
 sys.path.append('.\\src')
 from control.st_laser_control import LaserControl
-
-# Set the cufflinks to offline mode
-cf.set_config_file(world_readable=True, theme='white')
-cf.go_offline()
 
 # Streamlit page configuration
 st.set_page_config(
@@ -150,7 +145,7 @@ def pid_update():
 
 def start_scan():
     if not state.freq_lock_clicked:
-        control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan)
+        control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan, state.no_of_passes)
         state.scan_button = True
         state.scan_status = ":red[_Scan in Progress_]"
         state.scan = 1
@@ -248,10 +243,33 @@ def start_saving(name, path):
         control_loop.start_backup_saving(filepath)
         state.backup_enable = True
 
-
 def stop_saving():
     control_loop.stop_backup_saving()
     state.backup_enable = False
+
+def get_reading_thread_status():
+    status = control_loop.reader.reading_thread
+    if status is None:
+        return ":blue[Reading thread is not on]"
+    else: return ":red[Reading thread is on duty]"
+
+def stop_reading_thread():
+    control_loop.stop_reading
+
+def stop_tweaking_thread():
+    control_loop.stop_tweaking
+
+def get_saving_status():
+    status = control_loop.reader.saving_dir
+    if status is None:
+        return ":blue[Data is not being saved]"
+    else: return f":red[Data is being saved to {status}]"
+
+def get_tweaking_thread_status():
+    status = control_loop.tweaking_thread
+    if status is None:
+        return ":blue[Tweaking thread is not on]"
+    else: return f":red[Tweaking thread is on duty]"
 
 def update_values():
     state.c_wnum = get_cwnum()
@@ -266,15 +284,19 @@ def calculate_total_points(time_ps, rate, no_steps):
 
 def calculate_progress(progress, total_time):
     percent = round(progress / total_time, 4)
+    if percent >= 1:
+        percent = 1.
     etc = round((1 - percent) * total_time, 1)
-    progress_text = f"{percent:.2%} % of scan have completed. :blue[_Estimated Time of Completion: {etc} seconds left_]"
+    current_pass = control_loop.current_pass
+    current_pass += 1
+    progress_text = f"*Pass {current_pass}*: {percent:.2%} % of scan have completed. :blue[_Estimated Time of Completion: {etc} seconds left_]"
     return percent, progress_text
 
 def draw_progress_bar(total_time, progress_bar, scan_placeholder):
     progress = control_loop.scan_progress
-    if progress < total_time:
+    scan = control_loop.scan
+    if scan == 1:
         percent, progress_text = calculate_progress(progress, total_time)
-        #print(f"point={point}, total_points ={total_points}, total_time={total_time}, percent:{percent}")
         progress_bar.progress(percent, text=progress_text)
     else:
         print("scan stopped")
@@ -283,7 +305,7 @@ def draw_progress_bar(total_time, progress_bar, scan_placeholder):
 
 def control_loop_update():
     state.control_loop = control_loop
-    control_loop.update()
+    control_loop.set_current_wnum()
 
 def loop(plot, dataf_space):
     try:
@@ -318,11 +340,12 @@ def loop(plot, dataf_space):
 def scan_settings():
     initialize_state('centroid_wnum_default', get_cwnum())
     st.header("Scan Settings")
-    c1, c2 = st.columns(2, vertical_alignment='bottom')
+    c1, c2 = st.columns(2, vertical_alignment='top')
     start_wnum = c1.number_input("Start Wavenumber (cm^-1)", value=state.centroid_wnum_default, step=0.00001, format="%0.5f", key="start_wnum")
     end_wnum = c2.number_input("End Wavenumber (cm^-1)", value=state.centroid_wnum_default, step=0.00001, format="%0.5f", key="end_wnum")
     no_of_steps = c1.number_input("No. of Steps", value=5, max_value=500, key="no_of_steps")
     time_per_scan = c2.number_input("Time per Step (sec)", value=2.0, step=1., key="time_per_scan")
+    no_of_passes = c1.number_input("No. of Passes", value=1, max_value=10, key="no_of_passes")
     scan_range = end_wnum - start_wnum
     wnum_per_scan = scan_range / no_of_steps
     wnum_to_freq = 30
@@ -347,12 +370,8 @@ def scan_settings():
         st.markdown(f"Number of Steps: :orange-background[{no_of_steps_display}]")
         st.markdown(f"Time Per Scan(s): :orange-background[{time_per_scan_display}]")
         st.markdown(f"{mode} Per Scan({unit2}): :orange-background[{wnum_per_scan}]")
+        st.markdown(f"Number of passes: :orange-background[{no_of_passes}]")
 
-def draw_cavity():
-    ll1, ll2, ll3 = st.columns([1, 1, 3], vertical_alignment="center")
-    ll1.write("**Cavity**")
-    ll2.button(label=str(state.cavity_lock), on_click=lock_cavity, key="cavity_lock_button")
-    ll3.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=state.cavity_tuner_value, step=0.0001, format="%0.4f", on_change=tune_ref_cav)
 
 def draw_scanning(placeholder, key):
     button1, button2 = placeholder.columns([1, 1])
@@ -366,7 +385,7 @@ def main():
     state.netcon_tries = 0
     sleep_time = get_rate()
 
-    tab1, tab2, tab3 = sidebar.tabs(["Control", "Scan", "Save to"])
+    tab1, tab2, tab3, tab4 = sidebar.tabs(["Control", "Scan", "Save to", "Thread(s) Info"])
 
     etalon_lock_status = get_etalon_lock_status()
     cavity_lock_status = get_cavity_lock_status()
@@ -388,7 +407,10 @@ def main():
         l2.button(label=str(state.etalon_lock), on_click=lock_etalon, key="etalon_lock_button")
         l3.number_input("a", key="etalon_tuner", label_visibility="collapsed", value=state.etalon_tuner_value, format="%0.5f", on_change=tune_etalon, disabled=etalon_lock_status)
 
-        draw_cavity()
+        ll1, ll2, ll3 = st.columns([1, 1, 3], vertical_alignment="center")
+        ll1.write("**Cavity**")
+        ll2.button(label=str(state.cavity_lock), on_click=lock_cavity, key="cavity_lock_button")
+        ll3.number_input("a", key="cavity_tuner", label_visibility="collapsed", value=state.cavity_tuner_value, step=0.0001, format="%0.4f", on_change=tune_ref_cav)
 
         st.header("Wavelength Locker")
         with st.form("Lock Wavenumber", border=False):
@@ -440,6 +462,7 @@ def main():
             if directory:
                 status_msg.markdown(f"Selected directory: _{directory}_")
                 state.dialog_dir = directory
+
             else:
                 status_msg.markdown(":red[_No directory selected._]")
         if col1.button("Start Saving Data", disabled = state.backup_enable, on_click=start_saving, args=(backup_name, state.dialog_dir,)):
@@ -451,11 +474,28 @@ def main():
             state.dialog_dir = None
 
 
+    with tab4:
+        reading_status = get_reading_thread_status()
+        saving_status  = get_saving_status()
+        tweaking_status = get_tweaking_thread_status()
+        st.subheader("Reading and Saving Thread")
+        c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+        c1.markdown(f"Reading: {reading_status}")
+        c2.button("Stop Reading", on_click=stop_reading_thread)
+        c11, c12 = st.columns([3, 1], vertical_alignment="bottom")
+        c11.markdown(f"Saving: {saving_status}")
+        c12.button("Stop Saving", on_click=stop_saving)
+        st.markdown("❕:red[Caution: Saving will be stopped when reading thread stopped]")
+        st.subheader("Laser Tweaking Thread")
+        c21, c22 = st.columns([3, 1], vertical_alignment="bottom")
+        c21.markdown(f"Laser Tweaking: {tweaking_status}")
+        c22.button("Stop Tweaking", on_click=stop_tweaking_thread)
+
     plot = st.empty()
     place1, place2, place3, place4, place5, place6 = st.columns([4, 3, 1, 1, 1, 1], vertical_alignment="center")
     dataf_space = place1.empty()
     reading_rate = place2.empty()
-    if place3.button("Update Value", help="Trigger rerun to update lock status/values in the input"):
+    if place3.button("Update Value", help="Trigger rerun to update values in the input"):
         update_values()
     place4.button("Clear Plot", on_click=clear_plot)
     if place5.button("Rerun", type="primary"):
