@@ -48,7 +48,7 @@ def initialize_lock(key, condition):
 initialize_state("netcon_tries", 0)
 initialize_state("freq_lock_clicked", False)
 initialize_state('kp_enable', False)
-initialize_state('ki_enable', True)
+initialize_state('ki_enable', False)
 initialize_state('kd_enable', True)
 initialize_state("scan", 0)
 initialize_state("scan_button", False)
@@ -397,7 +397,7 @@ def main():
             a2.form_submit_button("Lock", on_click=freq_lock)
 
         unlock1, unlock2 = st.columns([2.7, 1], vertical_alignment="bottom")
-        unlock1.markdown(":red[_Wavelength Not Locked_]" if not state.freq_lock_clicked else ":red[_Wavelength Lock in Progress_]")
+        unlock1.markdown(":blue[_Wavelength Not Locked_]" if not state.freq_lock_clicked else ":red[_Wavelength Lock in Progress_]")
         unlock2.button("Unlock", disabled=not state.freq_lock_clicked, on_click=freq_unlock)
 
         st.subheader("PID Control")

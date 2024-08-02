@@ -62,12 +62,15 @@ class PIDController:
 
 class EMAServerReader:
     def __init__(self, pv_name: str, saving_dir: str = None, reading_frequency: float = 0.1,
-                 write_each: float = 100, ntp_sync_interval: float = 60, verbose: bool = False, plot_limit: int = 300):
+                 write_each: float = 100, ntp_sync_interval: float = 60, verbose: bool = False, plot_limit: int = 300, 
+                 saving_interval: int = 30):
         self.name = pv_name
         self.pv = PV(pv_name)
         self.saving_dir = saving_dir
         self.ntp_client = ntplib.NTPClient()
-        self.dataframe = pd.DataFrame(columns=['time', 'value'])
+        self.timelist = []
+        self.wnumlist = []
+        self.saving_interval = saving_interval
         self.write_each = write_each
         self.reading_frequency = reading_frequency
         self.ntp_sync_interval = ntp_sync_interval
@@ -135,7 +138,7 @@ class EMAServerReader:
         self.reading_thread.start()
 
     def _reading_loop(self):
-        # t0 = self.get_time()
+        t0 = self.get_time()
         while self.is_reading:
             try:
                 current_time, current_wnum = self.get_single_value()
@@ -148,10 +151,13 @@ class EMAServerReader:
                 #     print("Reading thread doing work")
 
                 #self.update_plot_df(current_time, current_wnum)
+                self.update_save_df(current_time, current_wnum)
                 self.update_plot_df_no_average(current_time, current_wnum)
-                if self.saving_dir is not None:
-                    self.save_single(current_time, current_wnum)
+                if self.saving_dir is not None and (current_time - t0) >= self.saving_interval:
+                    self.save_full()
                     t0 = current_time  # Reset the saving time interval
+                # if self.saving_dir is not None:
+                #     self.save_single(current_time, current_wnum)
                 time.sleep(self.reading_frequency)
             except Exception as e:
                 if self.verbose:
@@ -164,6 +170,10 @@ class EMAServerReader:
             if self.verbose:
                 print("Reading thread caught")
 
+    def update_save_df(self, time, wnum):
+        self.timelist.append(time)
+        self.wnumlist.append(wnum)
+    
     def update_full_df(self, payload: List[Dict[str, Any]]):
         df = pd.DataFrame(payload)
         self.dataframe = pd.concat([self.dataframe, df], ignore_index=True)
@@ -231,6 +241,20 @@ class EMAServerReader:
             if self.verbose:
                 print(f"Dava being saved to {self.saving_dir}")
     
+    def save_full(self):
+        data = {'Time': self.timelist,
+                'Wavenumber': self.wnumlist}
+        table = pa.table(data)
+        if os.path.exists(self.saving_dir):
+            with open(self.saving_dir, 'ab') as f:
+                pc.write_csv(table, f, write_options=pc.WriteOptions(include_header=False))
+        else:
+            with open(self.saving_dir, 'wb') as f:
+                pc.write_csv(table, f, write_options=pc.WriteOptions(include_header=True))
+        self.timelist, self.wnumlist = [], []
+        if self.verbose:
+            print(f"Dava being saved to {self.saving_dir}")
+    
     def get_plot_data(self):
         return self.xDat, self.yDat
     
@@ -270,7 +294,7 @@ class LaserControl(ControlLoop):
         self.is_tweaking = False
         self.scan_restarted = False
         self.scan_start_time = 0.
-        self.pid = PIDController(kp=40., ki=0., kd=0., setpoint=self.target)######
+        self.pid = PIDController(kp=40., ki=0.8, kd=0., setpoint=self.target)######
         self.reader = EMAServerReader(pv_name=wavenumber_pv, reading_frequency=self.rate, saving_dir=None, verbose=True)
         #A list of commands to be sent to the laser 
         self.patient_setup_status()
@@ -385,7 +409,6 @@ class LaserControl(ControlLoop):
         return ts, wn
 
     def set_current_wnum(self):
-        self.old_wnum = self.wnum
         self.wnum = self.reader.get_read_value()
     
     def get_conversion(self):
@@ -649,6 +672,8 @@ class LaserControl(ControlLoop):
 
     def update_conversion(self):
         conversion_change = 1
+        self.old_wnum = self.wnum
+        self.set_current_wnum()        
         actual_delta = self.wnum - self.old_wnum
         if abs(actual_delta) < abs(self.delta): self.conversion += conversion_change
         elif abs(actual_delta) > abs(self.delta): self.conversion -= conversion_change
@@ -680,7 +705,6 @@ class LaserControl(ControlLoop):
                         #set the wavelength to the target
                         if self.init == 1:
                             self.wavelength_setter()
-                            self.set_current_wnum()
                             self.update_conversion()
                         else:
                             # Simple proportional control
