@@ -4,7 +4,6 @@ import os
 import wx
 import time
 import traceback
-import asyncio
 import numpy as np
 import plotly
 import plotly.graph_objects as go
@@ -33,10 +32,22 @@ state = st.session_state
 
 # Initialize session state
 def initialize_state(key, default_value):
+    """Initialize the value for keys in the streamlit session state
+    
+    Args:
+        key(string): The key that needs to be initialized
+        default_value(any): The value to be stored in the session state
+    """
     if key not in state:
         state[key] = default_value
 
 def initialize_lock(key, condition):
+    """Initialize the icon for locks
+    
+    Args:
+        key(string): Lock to be initialized
+        condition(bool): Boolean value to be passed based on current lock status
+    """
     if key not in st.session_state:
         get_lock_icon(key, condition)
 
@@ -56,6 +67,13 @@ initialize_state("df_toSave", None)
 initialize_state("max_points", 100)  # Limit to last 100 points for plotting
 
 def error_page(description, error):
+    """Error page UI when error occurs
+    
+    Args:
+        description(string): The description of the error
+        error: Error that occured
+        
+    """
     st.error(description, icon="🚨")
     e1, e2 = st.columns(2)
     with e1.expander("View Error Details"):
@@ -64,9 +82,19 @@ def error_page(description, error):
         st.rerun()
 
 def ins_laser(laser_tag):
+    """Instantiate the laser control class with selected laser tag
+    
+    Arg:
+        laser_tag(string): Specify which laser to talk to
+    """
     return LaserControl("192.168.1.222", 39933, f"LaserLab:{laser_tag}", verbose=True)
 
 def patient_netconnect(tryouts=10):
+    """Try to instantiate the laser class if this is the first call, otherwise inherit the properties.
+    
+    Arg:
+        tryouts(int): The number of tries to initialize the laser setting. Default is 10 times
+    """
     global control_loop
     while state.netcon_tries <= tryouts:
         try:
@@ -84,22 +112,39 @@ def patient_netconnect(tryouts=10):
         raise ConnectionError
 
 def get_etalon_lock_status():
+    """Gets etalon lock status, returns corresponding boolean value, and raises an error if there is lock error
+    
+    Return:
+        bool: True if etalon lock is on and false otherwise.
+    """
     e_status = control_loop.etalon_lock_status
     assert isinstance(e_status, str) and e_status in ["on", "off"], f"Invalid etalon lock status: {e_status}"
     return True if  e_status == "on" else False
 
 def get_cavity_lock_status():
+    """Gets cavity lock status, returns corresponding boolean value, and raises an error if there is lock error
+    
+    Return:
+        bool: True if cavity lock is on and false otherwise.
+    """
     c_status = control_loop.reference_cavity_lock_status
     assert isinstance(c_status, str) and c_status in ["on", "off"], f"Invalid cavity lock status: {c_status}"
     return True if  c_status == "on" else False
 
 def get_lock_icon(key, condition):
+    """Sets the lock icon in the session state based on the condition
+    
+    Args:
+        key(string): The key in the session state for lock status
+        condition(bool): The boolean value based on the lock status
+    """
     if condition:
         st.session_state[key] = "🔐"
     else:
         st.session_state[key] = "🔓"   
 
 def lock_etalon():
+    """Lock etalon if it's unlocked and unlock otherwise"""
     if get_etalon_lock_status():
         control_loop.unlock_etalon()
         state["etalon_lock"] = "🔓"
@@ -109,6 +154,7 @@ def lock_etalon():
     control_loop.update_etalon_lock_status()
 
 def lock_cavity():
+    """Lock cavity if it's unlocked and unlock otherwise"""
     if get_cavity_lock_status():
         control_loop.unlock_reference_cavity()
         state["cavity_lock"] = "🔓"
@@ -118,12 +164,15 @@ def lock_cavity():
     control_loop.update_ref_cav_lock_status()
 
 def tune_etalon():
+    """Call tune etalon function to tune the etalon to the value specified in the etalon tuner"""
     control_loop.tune_etalon(state.etalon_tuner)
 
 def tune_ref_cav():
+    """Call tune reference cavity function to tune the reference cavity to the value specified in the cavity tuner"""    
     control_loop.tune_reference_cavity(state.cavity_tuner)
 
 def freq_lock():
+    """Lock in the wavelength of the laser to the number in the target wavenumber widget, if both locks are on"""
     if control_loop.reference_cavity_lock_status == "on" and control_loop.etalon_lock_status == "on":
         control_loop.lock(state.t_wnum)
         state["freq_lock_clicked"] = True
@@ -134,16 +183,19 @@ def freq_lock():
         st.toast("❗ Something is not locked ❗")
 
 def freq_unlock():
+    """Unlock the wavelength of the laser"""
     control_loop.unlock()
     st.toast("✅ Wavelength unlocked!")
     state["freq_lock_clicked"] = False
 
 def pid_update():
+    """Update pid value to the number in the slider if enabled, otherwise set to 0"""
     control_loop.p_update(1.0 if state.kp_enable else state.kp)
     control_loop.i_update(0.0 if state.ki_enable else state.ki)
     control_loop.d_update(0.0 if state.kd_enable else state.kd)
 
 def start_scan():
+    """Start scanning based on numbers in the widgets if laser frequency is not locked"""
     if not state.freq_lock_clicked:
         control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan, state.no_of_passes)
         state.scan_button = True
@@ -154,6 +206,7 @@ def start_scan():
         st.toast("👿 Unlock the wavelength first before starting a scan!")
 
 def stop_scan():
+    """Stop the current scan"""
     control_loop.stop_scan()
     state.scan_button = False
     state.scan_status = ":red[_Scan is Forcibly Stopped_]"
@@ -161,6 +214,7 @@ def stop_scan():
     st.toast("👀 Scan stopped!")
 
 def end_scan(placeholder):
+    """Ends the scan and redraw the UI widgets"""
     control_loop.stop_tweaking()
     state.scan_button = False
     state.scan_status = ":green[_Scan Finished_]"
@@ -169,34 +223,28 @@ def end_scan(placeholder):
     st.toast("Scan Completed!")
 
 def scan_update():
+    """Update time per scan based on number in the widget"""
     control_loop.scan_update(state.time_per_scan)
 
 def clear_plot():
+    """Clear plot"""
     control_loop.clear_plot()
-
-def patient_update():
-    control_loop.patient_update()
-
-def clear_data():
-    control_loop.clear_dataset()
 
 @st.cache_data
 def get_rate():
+    """Get reading rate"""
     return control_loop.rate
 
 def get_cwnum():
+    """Get current wavenumber"""
     return control_loop.get_current_wnum()
 
 def get_pid():
+    """Get pid coefficients"""
     return control_loop.pid.kp, control_loop.pid.ki, control_loop.pid.kd
 
-def write_to_file(filename, filepath, x_data, y_data):
-    name = f"{filename}.csv"
-    path = os.path.join(filepath, name)
-    with open(path, 'a') as file:
-        file.write(f"{x_data}, {y_data} \n")
-
 def open_directory_dialog():
+    """Create a directory picker using wx"""
     app = wx.App(False)
     dialog = wx.DirDialog(None, "Choose a directory", style=wx.DD_DEFAULT_STYLE)
     if dialog.ShowModal() == wx.ID_OK:
@@ -206,37 +254,13 @@ def open_directory_dialog():
     dialog.Destroy()
     return path
 
-def save_data(filename, filedir):
-    try:
-        name = f"{filename}.csv"
-        path = os.path.join(filedir, name)
-        control_loop.save_data(path)
-        st.success(f"File saved successfully to {path}")
-    except Exception as e:
-        st.error(f"**Failed to save file due to an error:** {e}")
-    
-@st.experimental_dialog("Save As")
-def save_file(data):
-    filename = st.text_input("File Name:", placeholder="Enter the file name...")
-    #filepath = st.text_input("File path:", placeholder="Enter the full path...")
-    col1, col2 = st.columns([1.5, 4], vertical_alignment="bottom")
-    # if col1.button("Select Directory"):
-    #     directory = open_directory_dialog()
-    #     if directory:
-    #         col2.write(f"Selected directory: {directory}")
-    #         state.dialog_dir = directory
-    #     else:
-    #         col2.write("No directory selected.")
-
-    c1, c2 = st.columns(2)
-    if c1.button("Save", key="save"):
-        save_data(filename=filename, filedir=state.dialog_dir)
-    
-    if c2.button("Keep Running", type="primary", key="clear_saved_data"):
-        clear_data()
-        st.rerun()
-
 def start_saving(name, path):
+    """Start saving data on teh background
+    
+    Args:
+        name(str): Filename
+        path(str): Location to save file to
+    """
     if state.dialog_dir:
         filename = f"{name}.csv"
         filepath = os.path.join(path, filename)
@@ -244,34 +268,52 @@ def start_saving(name, path):
         state.backup_enable = True
 
 def stop_saving():
+    """Stop saving data on the background"""
     control_loop.stop_backup_saving()
     state.backup_enable = False
 
 def get_reading_thread_status():
+    """Get status of the reading thread
+    
+    Return:
+        str: The status of the reading thread
+    """
     status = control_loop.reader.reading_thread
     if status is None:
         return ":blue[Reading thread is not on]"
     else: return ":red[Reading thread is on duty]"
 
-def stop_reading_thread():
-    control_loop.stop_reading
-
-def stop_tweaking_thread():
-    control_loop.stop_tweaking
-
 def get_saving_status():
-    status = control_loop.reader.saving_dir
-    if status is None:
+    """Return corresponding texts based on whether data are being saved to the disk
+    
+    Return:
+        str: The status of data saving"""
+    directory = control_loop.reader.saving_dir
+    if directory is None:
         return ":blue[Data is not being saved]"
-    else: return f":red[Data is being saved to {status}]"
+    else: return f":red[Data is being saved to {directory}]"
 
 def get_tweaking_thread_status():
+    """Get the status of the tweaking thread
+    
+    Returns:
+        str: The status of the tweaking thread
+    """
     status = control_loop.tweaking_thread
     if status is None:
         return ":blue[Tweaking thread is not on]"
     else: return f":red[Tweaking thread is on duty]"
 
+def stop_reading_thread():
+    """Catch the reading thread"""
+    control_loop.stop_reading
+
+def stop_tweaking_thread():
+    """Catch the tweaking thread"""
+    control_loop.stop_tweaking
+
 def update_values():
+    """Trigger rerun to update default values in the widgets"""
     state.c_wnum = get_cwnum()
     state.cavity_tuner_value = round(float(control_loop.get_ref_cav_tuner()), 5)
     state.etalon_tuner_value = round(float(control_loop.get_etalon_tuner()), 5)
@@ -305,9 +347,15 @@ def draw_progress_bar(total_time, progress_bar, scan_placeholder):
 
 def control_loop_update():
     state.control_loop = control_loop
-    control_loop.set_current_wnum()
+    control_loop.update()
 
 def loop(plot, dataf_space):
+    """Loop function that updates the current wavenumber and plot continuously in the while loop
+    
+    Args:
+        plot(placeholder): Placeholder for the plot
+        dataf_space(placeholder: Placeholder for the current wavenumber)
+    """
     try:
         xtoPlot, ytoPlot = control_loop.get_df_to_plot()
         control_loop_update()
@@ -315,7 +363,6 @@ def loop(plot, dataf_space):
     except Exception as e:
         error_page("Unable to update laser information.", e)
     # Time series plot
-    # ts, wn, ts_with_time, wn_with_time = control_loop.xDat, control_loop.yDat, control_loop.xDat_with_time, control_loop.yDat_with_time
     if xtoPlot and ytoPlot:
         fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(255,77,1, 1)')), layout=go.Layout(
             xaxis=dict(title="Time(s)"), yaxis=dict(title="Wavenumber (cm^-1)", exponentformat="none")
@@ -332,12 +379,11 @@ def loop(plot, dataf_space):
         # fig.update_yaxes(exponentformat="none")
         plot.plotly_chart(fig, theme='streamlit', use_container_width=True)
     dataf_space.metric(label="Current Wavenumber", value=c_wnum)
-        # state.df_toSave = pd.DataFrame({'Time': ts_with_time, 'Wavenumber': wn_with_time})
-    # if state.backup_enable:
-    #     write_to_file(state.backup_name, state.backup_dir, ts_with_time[-1], wn_with_time[-1])
+
 
 
 def scan_settings():
+    """Draw UI components for scan settings and expander to show info about scanning"""
     initialize_state('centroid_wnum_default', get_cwnum())
     st.header("Scan Settings")
     c1, c2 = st.columns(2, vertical_alignment='top')
@@ -374,6 +420,12 @@ def scan_settings():
 
 
 def draw_scanning(placeholder, key):
+    """Draws the UI components for scanning buttons and widgets
+    
+    Args:
+        placeholder(st.empty): placeholder for scan buttons and status message
+        key(str): Suffix for widgets' keys
+    """
     button1, button2 = placeholder.columns([1, 1])
     button1.button("Start Scan", on_click=start_scan, disabled=state.scan_button, key=f"start_{key}")
     button2.button("Stop Scan", on_click=stop_scan, type="primary", disabled=not state.scan_button, key=f"stop_{key}")
@@ -381,6 +433,7 @@ def draw_scanning(placeholder, key):
     button2.button("Update Time per Step", on_click=scan_update, disabled=not state.scan_button, key=f"update_tps_{key}")
 
 def main():
+    """Main function that draws UI"""
     patient_netconnect()
     state.netcon_tries = 0
     sleep_time = get_rate()
@@ -472,7 +525,6 @@ def main():
         if stop_button.button("Stop Saving Data", disabled = not state.backup_enable, on_click=stop_saving):
             status_msg.markdown(f":blue[_Data stopped saving to {state.dialog_dir}_]")
             state.dialog_dir = None
-
 
     with tab4:
         reading_status = get_reading_thread_status()

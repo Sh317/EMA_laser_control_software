@@ -385,7 +385,7 @@ class LaserControl(ControlLoop):
         self.scan_restarted = False
         self.scan_start_time = 0.
         self.pid = PIDController(kp=40., ki=0.8, kd=0., setpoint=self.target)######
-        self.reader = EMAServerReader(pv_name=wavenumber_pv, reading_frequency=self.rate, saving_dir=None, verbose=True)
+        self.reader = EMAServerReader(pv_name=wavenumber_pv, reading_frequency=self.rate, verbose=True)
         self.patient_setup_status()
         self.start_reading()
         self.set_current_wnum()
@@ -467,6 +467,10 @@ class LaserControl(ControlLoop):
                 else:
                     tries += 1
 
+    def update(self):
+        """Update funtion that runs every iteration, also an abstract method of the control loop"""
+        self.set_current_wnum()
+    
     def start_backup_saving(self, dir):
         """Passes the directory to the reader for data saving. This will automaticall start writing data to the disk"""
         self.reader.saving_dir = dir
@@ -727,7 +731,7 @@ class LaserControl(ControlLoop):
                 else: 
                     self.current_pass += 1
                     print(f"pass:{self.current_pass}")
-                    if self.current_pass <= self.total_passes:
+                    if self.current_pass < self.total_passes:
                         self.scan_targets = np.flip(self.scan_targets)
                         self.j = 0
                         self.scan_progress = 0.
