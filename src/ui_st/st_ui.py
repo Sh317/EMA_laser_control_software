@@ -4,11 +4,7 @@ import os
 import wx
 import time
 import traceback
-import numpy as np
-import plotly
 import plotly.graph_objects as go
-import cufflinks as cf
-import pandas as pd
 
 sys.path.append('.\\src')
 from control.st_laser_control import LaserControl
@@ -63,8 +59,6 @@ initialize_state("dialog_dir", None)
 initialize_state("backup_enable", False)
 initialize_state("backup_name", None)
 initialize_state("backup_dir", None)
-initialize_state("df_toSave", None)
-initialize_state("max_points", 100)  # Limit to last 100 points for plotting
 
 def error_page(description, error):
     """Error page UI when error occurs
@@ -145,23 +139,43 @@ def get_lock_icon(key, condition):
 
 def lock_etalon():
     """Lock etalon if it's unlocked and unlock otherwise"""
-    if get_etalon_lock_status():
-        control_loop.unlock_etalon()
-        state["etalon_lock"] = "🔓"
-    else:
-        control_loop.lock_etalon()
-        state["etalon_lock"] = "🔐"
-    control_loop.update_etalon_lock_status()
+    for tries in range(2):
+        try:
+            if get_etalon_lock_status():
+                control_loop.unlock_etalon()
+                state["etalon_lock"] = "🔓"
+            else:
+                control_loop.lock_etalon()
+                state["etalon_lock"] = "🔐"
+            control_loop.update_etalon_lock_status()
+            break
+        except Exception as e:
+            if tries >= 2:
+                error_page("Unable to lock etalon", e)
+                break
+            tries += 1
+            print(f"Error in locking etalon: {e}")
+            time.sleep(0.5)
 
 def lock_cavity():
     """Lock cavity if it's unlocked and unlock otherwise"""
-    if get_cavity_lock_status():
-        control_loop.unlock_reference_cavity()
-        state["cavity_lock"] = "🔓"
-    else:
-        control_loop.lock_reference_cavity()
-        state["cavity_lock"] = "🔐"
-    control_loop.update_ref_cav_lock_status()
+    for tries in range(2):
+        try:
+            if get_cavity_lock_status():
+                control_loop.unlock_reference_cavity()
+                state["cavity_lock"] = "🔓"
+            else:
+                control_loop.lock_reference_cavity()
+                state["cavity_lock"] = "🔐"
+            control_loop.update_ref_cav_lock_status()
+            break
+        except Exception as e:
+            if tries >= 2:
+                error_page("Unable to lock cavity", e)
+                break
+            tries += 1
+            print(f"Error in locking cavity: {e}")
+            time.sleep(0.5)
 
 def tune_etalon():
     """Call tune etalon function to tune the etalon to the value specified in the etalon tuner"""
@@ -173,14 +187,17 @@ def tune_ref_cav():
 
 def freq_lock():
     """Lock in the wavelength of the laser to the number in the target wavenumber widget, if both locks are on"""
-    if control_loop.reference_cavity_lock_status == "on" and control_loop.etalon_lock_status == "on":
-        control_loop.lock(state.t_wnum)
-        state["freq_lock_clicked"] = True
-        state["centroid_wnum_default"] = state.t_wnum
-        st.toast("✅ Wavelength locked!")
+    if state.t_wnum - state.c_wnum >= 0.1:
+        st.toast("👿 You are trying to tune cavity for more than $$0.1 cm^{-1}$$")
     else:
-        control_loop.unlock()
-        st.toast("❗ Something is not locked ❗")
+        if control_loop.reference_cavity_lock_status == "on" and control_loop.etalon_lock_status == "on":
+            control_loop.lock(state.t_wnum)
+            state["freq_lock_clicked"] = True
+            state["centroid_wnum_default"] = state.t_wnum
+            st.toast("✅ Wavelength locked!")
+        else:
+            control_loop.unlock()
+            st.toast("❗ Something is not locked ❗")
 
 def freq_unlock():
     """Unlock the wavelength of the laser"""
@@ -196,14 +213,19 @@ def pid_update():
 
 def start_scan():
     """Start scanning based on numbers in the widgets if laser frequency is not locked"""
-    if not state.freq_lock_clicked:
-        control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan, state.no_of_passes)
-        state.scan_button = True
-        state.scan_status = ":red[_Scan in Progress_]"
-        state.scan = 1
-        st.toast("👀 Scan started!")
-    else:
-        st.toast("👿 Unlock the wavelength first before starting a scan!")
+    if state.wnum_per_scan >= 0.1:
+        st.toast("👿 You are trying to start a scan with one step larger than $$0.1 cm^{-1}$$")
+    if abs(state.start_wnum - state.c_wnum) >= 0.1:
+        st.toast("👿 The start wavenumber is more than $$0.1 cm^{-1}$$ away from current wavenumber")
+    else:                 
+        if not state.freq_lock_clicked:
+            control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan, state.no_of_passes)
+            state.scan_button = True
+            state.scan_status = ":red[_Scan in Progress_]"
+            state.scan = 1
+            st.toast("👀 Scan started!")
+        else:
+            st.toast("👿 Unlock the wavelength first before starting a scan!")
 
 def stop_scan():
     """Stop the current scan"""
@@ -314,17 +336,22 @@ def stop_tweaking_thread():
 
 def update_values():
     """Trigger rerun to update default values in the widgets"""
-    state.c_wnum = get_cwnum()
+    state.target_default = get_cwnum()
     state.cavity_tuner_value = round(float(control_loop.get_ref_cav_tuner()), 5)
     state.etalon_tuner_value = round(float(control_loop.get_etalon_tuner()), 5)
     st.rerun()
-    
-def calculate_total_points(time_ps, rate, no_steps):
-    total_points = float(time_ps * no_steps)
-    total_time = time_ps * no_steps
-    return total_points, total_time
 
 def calculate_progress(progress, total_time):
+    """Calculate the progress of the scan and return the percent completed and corresponding text
+    
+    Args:
+        progress(float): Time elapsed in current pass of scan
+        total_time(float): Total time needed for one pass of scan
+        
+    Returns:
+        float: Percent completed
+        str: Status text displaying percent completed and eta
+    """
     percent = round(progress / total_time, 4)
     if percent >= 1:
         percent = 1.
@@ -335,6 +362,13 @@ def calculate_progress(progress, total_time):
     return percent, progress_text
 
 def draw_progress_bar(total_time, progress_bar, scan_placeholder):
+    """Draw progress bar based on the progress text
+    
+    Args:
+        total_time(float): Total time needed for one pass of scan
+        progress_bar(widget): Streamlit progress bar to be updated
+        scan_placeholder(widget): UI components to be redrawn when scan is completed
+    """
     progress = control_loop.scan_progress
     scan = control_loop.scan
     if scan == 1:
@@ -346,6 +380,7 @@ def draw_progress_bar(total_time, progress_bar, scan_placeholder):
         progress_bar.progress(1., text="Scan Completed!")
 
 def control_loop_update():
+    """Update control loop and the class stored in state session"""
     state.control_loop = control_loop
     control_loop.update()
 
@@ -359,7 +394,7 @@ def loop(plot, dataf_space):
     try:
         xtoPlot, ytoPlot = control_loop.get_df_to_plot()
         control_loop_update()
-        c_wnum = get_cwnum()
+        state.c_wnum = get_cwnum()
     except Exception as e:
         error_page("Unable to update laser information.", e)
     # Time series plot
@@ -378,13 +413,12 @@ def loop(plot, dataf_space):
         # fig.update_xaxes(exponentformat="none")
         # fig.update_yaxes(exponentformat="none")
         plot.plotly_chart(fig, theme='streamlit', use_container_width=True)
-    dataf_space.metric(label="Current Wavenumber", value=c_wnum)
-
-
+    dataf_space.metric(label="Current Wavenumber", value=state.c_wnum)
 
 def scan_settings():
     """Draw UI components for scan settings and expander to show info about scanning"""
     initialize_state('centroid_wnum_default', get_cwnum())
+    initialize_state('wnum_per_scan', 0.)
     st.header("Scan Settings")
     c1, c2 = st.columns(2, vertical_alignment='top')
     start_wnum = c1.number_input("Start Wavenumber (cm^-1)", value=state.centroid_wnum_default, step=0.00001, format="%0.5f", key="start_wnum")
@@ -393,7 +427,7 @@ def scan_settings():
     time_per_scan = c2.number_input("Time per Step (sec)", value=2.0, step=1., key="time_per_scan")
     no_of_passes = c1.number_input("No. of Passes", value=1, max_value=10, key="no_of_passes")
     scan_range = end_wnum - start_wnum
-    wnum_per_scan = scan_range / no_of_steps
+    state.wnum_per_scan = scan_range / no_of_steps
     wnum_to_freq = 30
     no_of_steps_display, time_per_scan_display = no_of_steps, time_per_scan
     exscander = st.expander("Scan Info")
@@ -405,11 +439,11 @@ def scan_settings():
             mode = "Frequency"
             unit1 = "GHz"
             unit2 = "MHz"
-            start_wnum_display, end_wnum_display, scan_range_display, wnum_per_scan = round(start_wnum * wnum_to_freq,2), round(end_wnum * wnum_to_freq,2), round(scan_range * wnum_to_freq * 1000, 7), round(wnum_per_scan * wnum_to_freq *1000, 7)
+            start_wnum_display, end_wnum_display, scan_range_display, wnum_per_scan = round(start_wnum * wnum_to_freq,2), round(end_wnum * wnum_to_freq,2), round(scan_range * wnum_to_freq * 1000, 7), round(state.wnum_per_scan * wnum_to_freq *1000, 7)
         else:
             mode = "Wavenumber"
             unit1, unit2 = "/cm", "/cm"
-            start_wnum_display, end_wnum_display, scan_range_display, no_of_steps_display = start_wnum, end_wnum, scan_range, no_of_steps
+            start_wnum_display, end_wnum_display, scan_range_display, no_of_steps_display, wnum_per_scan = start_wnum, end_wnum, scan_range, no_of_steps, round(state.wnum_per_scan, 5)
         st.markdown(f"Start Point({unit1}): :orange-background[{start_wnum_display}]")
         st.markdown(f"End Point({unit1}): :orange-background[{end_wnum_display}]")
         st.markdown(f"Total Scan Range({unit2}): :orange-background[{scan_range_display}]")
@@ -417,7 +451,10 @@ def scan_settings():
         st.markdown(f"Time Per Scan(s): :orange-background[{time_per_scan_display}]")
         st.markdown(f"{mode} Per Scan({unit2}): :orange-background[{wnum_per_scan}]")
         st.markdown(f"Number of passes: :orange-background[{no_of_passes}]")
-
+        if state.wnum_per_scan >= 0.1:
+            st.markdown("👿 :red[_One step is larger than $$0.1 cm^{-1}$$_]")
+        if abs(start_wnum - state.c_wnum) >= 0.1:
+            st.markdown("👿 :red[_The start wavenumber is more than $$0.1 cm^{-1}$$ away from current wavenumber_]")
 
 def draw_scanning(placeholder, key):
     """Draws the UI components for scanning buttons and widgets
@@ -444,9 +481,10 @@ def main():
     cavity_lock_status = get_cavity_lock_status()
     initialize_lock("etalon_lock", etalon_lock_status)
     initialize_lock("cavity_lock", cavity_lock_status)
-    initialize_state('c_wnum', get_cwnum())
+    initialize_state('target_default', get_cwnum())
     initialize_state("cavity_tuner_value", round(float(control_loop.get_ref_cav_tuner()), 5))
     initialize_state("etalon_tuner_value", round(float(control_loop.get_etalon_tuner()), 5))
+    initialize_state("c_wnum", get_cwnum())
 
     kp, ki, kd = get_pid()
     initialize_state("kp_default", kp)
@@ -468,7 +506,7 @@ def main():
         st.header("Wavelength Locker")
         with st.form("Lock Wavenumber", border=False):
             a1, a2 = st.columns([2.7, 1], vertical_alignment="bottom")
-            t_wnum = a1.number_input("Target Wavenumber (cm^-1)", value=state.c_wnum, step=0.00001, format="%0.5f", key="t_wnum")
+            t_wnum = a1.number_input("Target Wavenumber (cm^-1)", value=state.target_default, step=0.00001, format="%0.5f", key="t_wnum")
             a2.form_submit_button("Lock", on_click=freq_lock)
 
         unlock1, unlock2 = st.columns([2.7, 1], vertical_alignment="bottom")
@@ -552,7 +590,6 @@ def main():
     place4.button("Clear Plot", on_click=clear_plot)
     if place5.button("Rerun", type="primary"):
         st.rerun()
-    place6.button("Stop Child Thread(s)", on_click=control_loop.stop)
 
     while True:
         reading_rate.metric(label="Reading Rate (s)", value=sleep_time)
@@ -561,6 +598,7 @@ def main():
             draw_progress_bar(total_time, scan_bar, scan_placeholder)
         loop(plot, dataf_space)
         time.sleep(0.1)
+
 
 
 if __name__ == "__main__":
