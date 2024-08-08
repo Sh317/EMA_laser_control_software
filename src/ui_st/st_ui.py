@@ -187,7 +187,7 @@ def tune_ref_cav():
 
 def freq_lock():
     """Lock in the wavelength of the laser to the number in the target wavenumber widget, if both locks are on"""
-    if state.t_wnum - state.c_wnum >= 0.1:
+    if abs(state.t_wnum - state.c_wnum) >= 0.1:
         st.toast("👿 You are trying to tune cavity for more than $$0.1 cm^{-1}$$")
     else:
         if control_loop.reference_cavity_lock_status == "on" and control_loop.etalon_lock_status == "on":

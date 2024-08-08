@@ -84,6 +84,7 @@ class LaserControl(ControlLoop):
                 if tries >= tryouts:
                     print(f"Unable to connect to laser after {tryouts} tries. Error: {e}")
                     raise ConnectionRefusedError
+                    break
                 else:
                     tries += 1
         
@@ -111,6 +112,7 @@ class LaserControl(ControlLoop):
                 if tries >= tryouts:
                     print(f"Unable to set patient setup status after {tryouts} tries. Error: {e}")
                     raise ConnectionRefusedError
+                    break
                 else:
                     tries += 1
     
@@ -129,6 +131,7 @@ class LaserControl(ControlLoop):
                 if tries >= tryouts:
                     print(f"Unable to acquire laser information. Error: {e}")
                     raise ConnectionRefusedError
+                    break
                 else:
                     tries += 1
 
@@ -322,6 +325,7 @@ class LaserControl(ControlLoop):
                 print(f"Tryouts: {tries}")
                 if tries == 2:
                     raise ConnectionRefusedError
+                    break
                 tries += 1
                 time.sleep(1)
         return self.reference_cavity_tuner_value
@@ -498,7 +502,7 @@ class LaserControl(ControlLoop):
                     self.update_tuner += 1
                     if self.update_tuner == 5:
                         before = self.reference_cavity_tuner_value
-                        now = self.update_ref_cav_tuner()
+                        now = self.get_ref_cav_tuner()
                         self.update_tuner = 0
                         print(f"Ref cav updated from {before} to {now}")
 
