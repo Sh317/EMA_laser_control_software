@@ -52,15 +52,6 @@ class EMASolstis(M2.Solstis):
                                             on_error=self.on_error,
                                             on_close=self.on_close)
                 ws.run_forever()
-                # while True:
-                #     # ws=websocket.create_connection("ws://{}:8088/control.htm".format(self.conn[0]),timeout=5.)
-
-                #     # Create a WebSocket connection
-                #     info = self._read_web_status(ws, present_key=present_key, nmax = nmax)
-                #     #ws.close()
-                #     after = time.time()
-                #     print(f"It takes {after-before}s, info={info}")
-                #     time.sleep(0.1)
             finally:
                 ws.close()
         else:
