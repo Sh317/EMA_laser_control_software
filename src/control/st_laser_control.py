@@ -49,7 +49,7 @@ class LaserControl(ControlLoop):
         self.is_tweaking = False
         self.scan_restarted = False
         self.scan_start_time = 0.
-        self.pid = PIDController(kp=40., ki=0.8, kd=0., setpoint=self.target)######
+        self.pid = PIDController(kp=40., ki=0.8, kd=0., setpoint=self.target)
         self.reader = EMAServerReader(pv_name=wavenumber_pv, reading_frequency=self.rate, verbose=True)
         self.patient_setup_status()
         self.start_reading()
