@@ -85,15 +85,16 @@ This file implements the `GUI` class for the laser control application:
 1. **Ensure Dependencies are Installed**:
    - Streamlit
    - plotly
-   - epics
+   - Pyepics
    - numpy
    - pylablib
    - pyarrow
-   - wx
-
+   - wxPython
+   - ntplib
+   
    You can install these dependencies using pip:
    ```bash
-   pip install Streamlit plotly epics numpy pylablib pyarrow wx
+   pip install Streamlit plotly Pyepics numpy pylablib pyarrow wxPython ntplib
    ```
 
 2. **Run the Application**:
