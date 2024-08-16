@@ -1,276 +1,29 @@
 from pylablib.devices import M2
 import numpy as np
-from epics import PV
-from .base import ControlLoop
 import datetime
 import time
-import pandas as pd
-import pyarrow as pa
-import pyarrow.csv as pc
-import os
-import ntplib
 from time import ctime
 from typing import List, Dict, Any, Optional
 import threading
 import asyncio
-import traceback
-
-class PIDController:
-    def __init__(self, kp, ki, kd, setpoint):
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.setpoint = setpoint
-        self.integral = 0
-        self.previous_error = 0
-        self.previous_time = time.time()
-        self.first_update_call = True
-
-    def update(self, current_value):
-        current_time = time.time()
-        error = self.setpoint - current_value
-        if self.first_update_call: 
-            self.first_update_call = False
-            derivative = 0.
-        else:
-            delta_time = current_time - self.previous_time
-            self.integral += error * delta_time
-            derivative = (error - self.previous_error) / delta_time
-
-        output = (self.kp * error) + (self.ki * self.integral) + (self.kd * derivative)
-
-        self.previous_error = error
-        self.previous_time = current_time
-
-        return error, output
-    
-    def new_loop(self):
-        self.first_update_call = True
-        self.integral = 0.
-    
-    def update_kp(self, new_value):
-        self.kp = new_value 
-
-    def update_ki(self, new_value):
-        self.ki = new_value 
-
-    def update_kd(self, new_value):
-        self.kd = new_value 
-    
-    def update_setpoint(self, new_value):
-        self.setpoint = new_value
-
-class EMAServerReader:
-    def __init__(self, pv_name: str, saving_dir: str = None, reading_frequency: float = 0.1,
-                 write_each: float = 100, ntp_sync_interval: float = 60, verbose: bool = False, plot_limit: int = 300, 
-                 saving_interval: int = 30):
-        self.name = pv_name
-        self.pv = PV(pv_name)
-        self.saving_dir = saving_dir
-        self.ntp_client = ntplib.NTPClient()
-        self.timelist = []
-        self.wnumlist = []
-        self.saving_interval = saving_interval
-        self.write_each = write_each
-        self.reading_frequency = reading_frequency
-        self.ntp_sync_interval = ntp_sync_interval
-        self.date_format = '%a %b %d %H:%M:%S %Y'
-        self.verbose = verbose
-        self.last_ntp_sync_time = time.time()
-        self.offset = 0
-        self.xDat = []
-        self.yDat = []
-        self.y_for_average = np.array([])
-        self.first_time = 0.
-        self.plot_limit = plot_limit
-        self.reading_thread = None
-        self.is_reading = False
-        self.latest_data = None
-
-    def sync_time_with_ntp(self):
-        async def sync_time():
-            try:
-                response = await asyncio.get_event_loop().run_in_executor(None, self.ntp_client.request, 'pool.ntp.org')
-                ntp_time = response.tx_time
-                self.offset = ntp_time - time.time()
-                self.last_ntp_sync_time = time.time()
-                if self.verbose:
-                    print(f"Time synchronized with NTP. Offset: {self.offset} seconds")
-            except Exception as e:
-                if self.verbose:
-                    print(f"Error syncing time with NTP: {e}")
-        
-        asyncio.run(sync_time())
-                        
-
-    def get_time(self):
-        if time.time() - self.last_ntp_sync_time > self.ntp_sync_interval:
-            self.sync_time_with_ntp()
-        return time.time() + self.offset
-
-    def get_read_value(self):
-        try:
-            value = self.pv.get()
-            value = round(float(value), 5)
-            return value
-        except Exception as e:
-            if self.verbose:
-                print(f"Error reading value for {self.name}: {e}. \n {traceback.format_exc()}")
-            return None
-
-    def get_batch(self, n_samples=100) -> List[Dict[str, Any]]:
-        return self.dataframe.iloc[-min(n_samples, len(self.dataframe)):]
-    
-    def get_single_value(self) -> Dict[str, Any]:
-        current_time = self.get_time()
-        scalar = self.get_read_value()
-        #({'time': [current_time], 'value': [scalar]})
-        return current_time, scalar
-
-    def start_reading(self):
-        print(f"Starting reading for {self.name}")
-        if self.is_reading:
-            if self.verbose:
-                print("Reading is already in progress.")
-            return
-        self.is_reading = True
-        self.reading_thread = threading.Thread(target=self._reading_loop, daemon=True)
-        self.reading_thread.start()
-
-    def _reading_loop(self):
-        t0 = self.get_time()
-        while self.is_reading:
-            try:
-                current_time, current_wnum = self.get_single_value()
-                if not current_time or not current_wnum:
-                    if self.verbose:
-                        print("Failed to get payload. Continuing.")
-                    time.sleep(self.reading_frequency)
-                    continue
-                # if self.verbose:
-                #     print("Reading thread doing work")
-
-                #self.update_plot_df(current_time, current_wnum)
-                self.update_save_df(current_time, current_wnum)
-                self.update_plot_df_no_average(current_time, current_wnum)
-                if self.saving_dir is not None and (current_time - t0) >= self.saving_interval:
-                    self.save_full()
-                    t0 = current_time  # Reset the saving time interval
-                # if self.saving_dir is not None:
-                #     self.save_single(current_time, current_wnum)
-                time.sleep(self.reading_frequency)
-            except Exception as e:
-                if self.verbose:
-                    print(f"Exception in reading loop: {e}")
-
-    def stop_reading(self):
-        self.is_reading = False
-        if self.reading_thread:
-            self.reading_thread.join()
-            if self.verbose:
-                print("Reading thread caught")
-
-    def update_save_df(self, time, wnum):
-        self.timelist.append(time)
-        self.wnumlist.append(wnum)
-    
-    def update_full_df(self, payload: List[Dict[str, Any]]):
-        df = pd.DataFrame(payload)
-        self.dataframe = pd.concat([self.dataframe, df], ignore_index=True)
-    
-    def update_plot_df(self, current_time, current_wnum):
-        # if len(self.xDat) == self.plot_limit:
-        #     self.xDat = np.delete(self.xDat, 0)
-        #     self.yDat = np.delete(self.yDat, 0)
-        # if len(self.xDat) == 0:
-        #     self.xDat = np.array([0])
-        #     self.first_time = self.get_time()
-        # else:
-        #     rel_time = current_time - self.first_time
-        #     self.xDat = np.append(self.xDat, rel_time)    
-        # self.yDat = np.append(self.yDat, current_wnum)
-        if len(self.xDat) == self.plot_limit:
-            self.xDat.pop(0)
-            self.yDat.pop(0)
-
-        if len(self.xDat) == 0:
-            self.first_time = self.get_time()
-            self.xDat.append(0)
-            self.yDat.append(current_wnum)
-        
-        if len(self.y_for_average) < 5:
-            self.y_for_average = np.append(self.y_for_average, current_wnum)
-        else:
-            rel_time = current_time - self.first_time
-            self.xDat.append(rel_time)
-            mean = np.mean(self.y_for_average)
-            self.yDat.append(mean)
-            self.y_for_average = np.array([])
-            self.y_for_average = np.append(self.y_for_average, current_wnum)
-
-    def update_plot_df_no_average(self, current_time, current_wnum):
-        if len(self.xDat) == self.plot_limit:
-            self.xDat.pop(0)
-            self.yDat.pop(0)
-
-        if len(self.xDat) == 0:
-            self.first_time = self.get_time()
-            self.xDat.append(0)
-        else:
-            rel_time = current_time - self.first_time
-            self.xDat.append(rel_time)
-        
-        self.yDat.append(current_wnum)              
-
-    def save_full_df(self, dir):
-        if not self.dataframe.empty:
-            self.dataframe.to_csv(dir, mode='x', index=False)
-            print(f"Data saved to {dir}")
-    
-    def save_single(self, time, wnum):
-        if time and wnum:
-            data = {'Time': [time],
-                    'Wavenumber': [wnum]}
-            table = pa.table(data)
-            if os.path.exists(self.saving_dir):
-                with open(self.saving_dir, 'ab') as f:
-                    pc.write_csv(table, f, write_options=pc.WriteOptions(include_header=False))
-            else:
-                with open(self.saving_dir, 'wb') as f:
-                    pc.write_csv(table, f, write_options=pc.WriteOptions(include_header=True))
-            if self.verbose:
-                print(f"Dava being saved to {self.saving_dir}")
-    
-    def save_full(self):
-        data = {'Time': self.timelist,
-                'Wavenumber': self.wnumlist}
-        table = pa.table(data)
-        if os.path.exists(self.saving_dir):
-            with open(self.saving_dir, 'ab') as f:
-                pc.write_csv(table, f, write_options=pc.WriteOptions(include_header=False))
-        else:
-            with open(self.saving_dir, 'wb') as f:
-                pc.write_csv(table, f, write_options=pc.WriteOptions(include_header=True))
-        self.timelist, self.wnumlist = [], []
-        if self.verbose:
-            print(f"Dava being saved to {self.saving_dir}")
-    
-    def get_plot_data(self):
-        return self.xDat, self.yDat
-    
-    def clear_plot(self):
-        self.xDat, self.yDat = [], []
-
-    def get_latest_data(self) -> Optional[Dict[str, Any]]:
-        return self.latest_data
-
-    def get_dataframe(self) -> pd.DataFrame:
-        return self.dataframe
+from .base import ControlLoop
+from .pid_controller import PIDController
+from .server_reader import EMAServerReader
 
 
 
 class LaserControl(ControlLoop):
+    """Main class that controls the M2 laser"""
     def __init__(self, ip_address, port, wavenumber_pv, verbose):
+
+        """Constructor function that initializes the class and passes laser information
+
+        Args:
+            ip_address(str): IP address for the M2 laser
+            port(int): Port for the M2 laser
+            wavenumber_pv(str): PV for getting wavenumber
+            verbose(bool): whether to print messages on the terminal
+        """
         self.laser = None
         self.ip_address = ip_address
         self.port = port    
@@ -284,6 +37,8 @@ class LaserControl(ControlLoop):
         self.scan_progress = 0.
         self.total_time = 0.
         self.scan_step_start_time = 0.
+        self.current_pass = 0
+        self.total_passes = 1
         self.rate = 0.1  #in seconds
         self.conversion = 60
         self.now = datetime.datetime.now()
@@ -294,17 +49,26 @@ class LaserControl(ControlLoop):
         self.is_tweaking = False
         self.scan_restarted = False
         self.scan_start_time = 0.
-        self.pid = PIDController(kp=40., ki=0.8, kd=0., setpoint=self.target)######
-        self.reader = EMAServerReader(pv_name=wavenumber_pv, reading_frequency=self.rate, saving_dir=None, verbose=True)
-        #A list of commands to be sent to the laser 
+        self.pid = PIDController(kp=40., ki=0.8, kd=0., setpoint=self.target)
+        self.reader = EMAServerReader(pv_name=wavenumber_pv, reading_frequency=self.rate, verbose=True)
         self.patient_setup_status()
         self.start_reading()
         self.set_current_wnum()
 
     def start_reading(self):
+        """Start reading thread"""
         self.reader.start_reading()
-        
+
+    def stop_reading(self):
+        """Stop reading thread"""
+        self.reader.stop_reading()
+
     def patient_laser_init(self, tryouts = 2) -> None:
+        """Try to instantiate the laser module
+        
+        Args:
+            Tryouts(int): Times to try communicating with the M2 laser
+        """
         laser_set = 0
         tries = 0
         if self.laser:
@@ -320,10 +84,16 @@ class LaserControl(ControlLoop):
                 if tries >= tryouts:
                     print(f"Unable to connect to laser after {tryouts} tries. Error: {e}")
                     raise ConnectionRefusedError
+                    break
                 else:
                     tries += 1
         
     def patient_setup_status(self, tryouts = 2) -> None:
+        """Initialize locks status and tuner value
+        
+        Arg:
+            tryouts(int): Times to try to acquire laser information
+        """
         if not self.laser:
             raise ConnectionError
         status_set = 0
@@ -342,6 +112,7 @@ class LaserControl(ControlLoop):
                 if tries >= tryouts:
                     print(f"Unable to set patient setup status after {tryouts} tries. Error: {e}")
                     raise ConnectionRefusedError
+                    break
                 else:
                     tries += 1
     
@@ -360,48 +131,28 @@ class LaserControl(ControlLoop):
                 if tries >= tryouts:
                     print(f"Unable to acquire laser information. Error: {e}")
                     raise ConnectionRefusedError
+                    break
                 else:
                     tries += 1
 
-    def _update(self):
-        self.set_current_wnum()
-        #print(self.wnum)
-
-        # if len(self.xDat) == 60:
-        #     self.xDat = np.delete(self.xDat, 0)
-        #     self.yDat = np.delete(self.yDat, 0)
-        # if len(self.xDat) == 0:
-        #     self.xDat = np.array([0])
-        # else:
-        #     self.xDat = np.append(self.xDat, self.xDat[-1] + self.rate*0.001)    
-
-        # if len(self.xDat_with_time) == 0:
-        #     self.xDat_with_time.append(self.now) 
-        # else:
-        #     self.xDat_with_time.append(self.xDat_with_time[-1] + self.time_converter(self.rate))
-        
-        # print(f"real: {datetime.datetime.now()}, stamp: {self.xDat_with_time[-1]}")
-
-        # self.yDat = np.append(self.yDat, self.wnum)
-        # self.yDat_with_time = np.append(self.yDat_with_time, self.wnum)
-
     def update(self):
-        try:
-            self._update()
-        except Exception as e:
-            print(f"Error in LaserControl._update: {e}")
-            pass
-
-    def save_data(self, dir):
-        self.reader.save_full_df(dir)
-
+        """Update funtion that runs every iteration, also an abstract method of the control loop"""
+        self.set_current_wnum()
+    
     def start_backup_saving(self, dir):
+        """Passes the directory to the reader for data saving. This will automaticall start writing data to the disk"""
         self.reader.saving_dir = dir
     
     def stop_backup_saving(self):
+        """Clear the saving directory of the reader, which will stop saving data automatically"""
         self.reader.saving_dir = None
     
-    def get_df_to_plot(self):        
+    def get_df_to_plot(self):
+        """Get data to plot from the reader
+        Returns:
+            list: x data - time stamp
+            list: y data - wavenumber
+        """        
         ts, wn = self.reader.get_plot_data()
         # if len(ts)>0 and len(wn)>0:
         #     print(ts[-1], wn[-1])
@@ -409,12 +160,20 @@ class LaserControl(ControlLoop):
         return ts, wn
 
     def set_current_wnum(self):
-        self.wnum = self.reader.get_read_value()
+        """Set self.wnum to current wavenumber"""
+        try:
+            self.wnum = self.reader.get_read_value()
+        except Exception as e:
+            print(f"Error in setting the wavenumber: {e}")
+            raise        
     
     def get_conversion(self):
+        """Start process to hack the conversion constants between the wavenumber and voltage of the reference cavity"""
         self.state = 2
+        self.start_tweaking()
 
     def do_conversion(self):
+        """Try to hack the conversion constants between the wavenumber and voltage of the reference cavity"""
         list = np.linspace(10, 100, 10)
         loop = 0
         loopend = 5
@@ -448,6 +207,7 @@ class LaserControl(ControlLoop):
         self.state = 0
     
     def hack_reading_rate(self):
+        """Hack the publishing rate of the wavemeter server"""
         rates = np.linspace(500, 1, 100)
         effective_rates = np.array([])
         loop = 0
@@ -471,9 +231,19 @@ class LaserControl(ControlLoop):
         print(f"potential list: {unique}")
 
     def get_current_wnum(self):
+        """Get the current wavenumber
+        
+        Return:
+            float: current wavenumber
+        """
         return self.wnum
     
     def lock(self, value):
+        """Start a child thread to lock in the wavelength of the laser
+        
+        Arg:
+            value(float): Target wavelength
+        """
         self.state = 1
         if self.verbose:
             print(f"lock function called with state being {self.state}")
@@ -486,6 +256,7 @@ class LaserControl(ControlLoop):
                 print("One tweaking thread initiated for the wavelength lock")
 
     def unlock(self):
+        """Unlock the wavelength of laser, clear the plot,  and stop the child thread"""
         self.state = 0
         self.scan = 0
         self.stop_tweaking()
@@ -493,18 +264,27 @@ class LaserControl(ControlLoop):
         self.clear_plot()
 
     def lock_etalon(self):
+        """Lock the etalon lock"""
         self.laser.lock_etalon()
 
     def unlock_etalon(self):
+        """Unlock the etalon lock"""
         self.laser.unlock_etalon()
 
     def lock_reference_cavity(self):
+        """Lock the reference cavity lock"""
         self.laser.lock_reference_cavity()
 
     def unlock_reference_cavity(self):
+        """Unlock the reference cavity lock"""
         self.laser.unlock_reference_cavity()
 
     def tune_reference_cavity(self, value):
+        """Tune reference cavity tuner to the set value
+        
+        Arg:
+            value(float): Target tuner value for reference cavity tuner
+        """
         if self.reply is None:
             self.reply = "something"
             self.reply = self.laser.tune_reference_cavity(value, sync=True)
@@ -512,13 +292,29 @@ class LaserControl(ControlLoop):
                 print("ref cavity tuned")
         
     def tune_etalon(self, value):
+        """Tune reference cavity tuner to the set value and acquire the latest etalon tuner value
+        
+        Arg:
+            value(float): Target tuner value for reference cavity tuner
+        """
         self.laser.tune_etalon(value)
         self.etalon_tuner_value = self.laser.get_full_web_status()['etalon_tune']
     
     def get_etalon_tuner(self):
+        """Get current etalon tuner value
+        
+        Return:
+            float: Current etalon tuner value"""
         return self.etalon_tuner_value
 
     def get_ref_cav_tuner(self, tryouts=2):
+        """Get reference cavity tuner value
+
+        Arg:
+            tryouts(int): Times to try getting the cavity tuner value
+        
+        Return:
+            float: Current ref cavity tuner value"""
         tries = 0
         for tries in range(tryouts):
             try:
@@ -529,11 +325,16 @@ class LaserControl(ControlLoop):
                 print(f"Tryouts: {tries}")
                 if tries == 2:
                     raise ConnectionRefusedError
+                    break
                 tries += 1
                 time.sleep(1)
         return self.reference_cavity_tuner_value
     
     def update_ref_cav_tuner(self):
+        """Update the reference cavity tuner value asynchronously and return it
+        Return:
+            float: current reference cavity value
+        """
         async def update_ref_tuner():
             try:
                 before = self.reference_cavity_tuner_value
@@ -545,12 +346,14 @@ class LaserControl(ControlLoop):
         return self.reference_cavity_tuner_value
 
     def update_etalon_lock_status(self):
+        """Update the etalon lock status"""
         self.etalon_lock_status = self.laser.get_etalon_lock_status()
 
     def update_ref_cav_lock_status(self):
+        """Update the reference cavity lock status"""        
         self.reference_cavity_lock_status = self.laser.get_reference_cavity_lock_status()
 
-    def start_scan(self, start, end, no_scans, time_per_scan):
+    def start_scan(self, start, end, no_scans, time_per_scan, no_of_passes):
         self.scan_targets = np.linspace(start, end, no_scans)
         self.set_tps = time_per_scan
         self.state = 1
@@ -559,6 +362,8 @@ class LaserControl(ControlLoop):
         self.jmax = no_scans
         self.scan_progress = 0.
         self.total_time = no_scans * time_per_scan
+        self.total_passes = no_of_passes
+        self.current_pass = 0
         self.scan_restarted = True
         self.start_tweaking()
     
@@ -571,6 +376,7 @@ class LaserControl(ControlLoop):
         self.scan = 0
         self.state = 0
         self.scan_progress = self.total_time
+        self.current_pass = 0
     
     def _do_scan(self):
         try:
@@ -592,10 +398,15 @@ class LaserControl(ControlLoop):
                     self.scan_time = 0
                     self.j += 1
                 else: 
-                    self.end_scan()
-            
-            #to convert rate to seconds
-            print(f"progress:{self.j}, total:{self.jmax}")
+                    self.current_pass += 1
+                    print(f"pass:{self.current_pass}")
+                    if self.current_pass < self.total_passes:
+                        self.scan_targets = np.flip(self.scan_targets)
+                        self.j = 0
+                        self.scan_progress = 0.
+                        self.scan_restarted = True
+                    else:
+                        self.end_scan()
         except IndexError:
             self.scan = 0
             self.state = 0
@@ -609,7 +420,6 @@ class LaserControl(ControlLoop):
         delta *= self.conversion
         tuning = self.reference_cavity_tuner_value - delta
         self.tune_reference_cavity(tuning)
-        print(f"setter tuning={delta}")
         self.reference_cavity_tuner_value = tuning
         self.init = 0
         self.pid.update_setpoint(self.target)
@@ -692,7 +502,7 @@ class LaserControl(ControlLoop):
                     self.update_tuner += 1
                     if self.update_tuner == 5:
                         before = self.reference_cavity_tuner_value
-                        now = self.update_ref_cav_tuner()
+                        now = self.get_ref_cav_tuner()
                         self.update_tuner = 0
                         print(f"Ref cav updated from {before} to {now}")
 
@@ -740,12 +550,11 @@ class LaserControl(ControlLoop):
         return datetime.timedelta(milliseconds = value)
 
     def clear_plot(self):
+        """Clear the data to plot"""
         self.reader.clear_plot()
     
-    def clear_dataset(self):
-        self.reader.dataframe = pd.DataFrame(columns=['time', 'value'])
-    
     def stop(self):
+        """Stop all child threads"""
         self.reader.stop_reading()
         self.stop_tweaking()
         pass
