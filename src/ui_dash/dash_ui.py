@@ -43,12 +43,41 @@ def get_cwnum():
 def error(error, header, icon):
     set_props('toast', {'header': f'{header}', 'children': f"Error: {error} \n {traceback.format_exc()}", 'icon': f'{icon}'})
 
-patient_netconnect()
-reading_rate = get_rate()
+
+
+
+# patient_netconnect()
+# reading_rate = get_rate()
+reading_rate = 0.1
 
 
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.LUX])
+
+colors = {'sidebar_bg': "#D3D3D3",
+          'main_bg': "#f8f9fa",
+          'value': "#FA8128",
+          'label': "#00008B",
+          'status_inactive': "#9c9c9f",
+          'status_active': "#f0ad4e",
+          }
+
+text_style = {'sub_header': {'fontSize': '18px','fontWeight': 'bold','padding': '14px 0'},
+              'label': {'fontSize': '14px','fontWeight': 'bold', 'color': colors['label']}}
+state = {
+    'etalon_lock': False,
+    'etalon_tuner_value': 0.0,
+    'cavity_lock': False,
+    'cavity_tuner_value': 0.0,
+    'target_default': 0.0,
+    'freq_lock_clicked': False,
+    'kp_enable': True,
+    'ki_enable': True,
+    'kd_enable': True,
+    'kp_default': 0.0,
+    'ki_default': 0.0,
+    'kd_default': 0.0
+}
 
 title_bar = dbc.Navbar(
         dbc.Container([
@@ -67,7 +96,64 @@ title_bar = dbc.Navbar(
         style={"height": "4rem"}
     )
 
-tab1 =  dcc.Tab(label='Control', value='tab-1', style={"background-color": "#f8f9fa"})
+tab1_content = dbc.Container([
+    html.H4("SolsTis Control", style=text_style['sub_header']),
+    
+    dbc.Row([
+        dbc.Col(dcc.Markdown("**Etalon**", style=text_style['label']), width=3,),
+        dbc.Col(dbc.Button(id='etalon_lock_button', children=str(state['etalon_lock'])), width=3,),
+        dbc.Col(dcc.Input(id='etalon_tuner', type='number', value=state['etalon_tuner_value'], step=0.00001), width=6,),
+    ], align='center', justify='evenly'),
+
+    html.Br(),
+
+    dbc.Row([
+        dbc.Col(dcc.Markdown("**Cavity**", style=text_style['label']), width=3),
+        dbc.Col(dbc.Button(id='cavity_lock_button', children=str(state['cavity_lock'])), width=3),
+        dbc.Col(dcc.Input(id='cavity_tuner', type='number', value=state['cavity_tuner_value'], step=0.0001), width=6),
+    ], align='center', justify='evenly'),
+
+    html.Br(),
+
+    html.H4("Wavelength Locker", style=text_style['sub_header']),
+    
+    dbc.Row([
+        dbc.Col(dcc.Markdown("Target Wavenumber", style=text_style['label']), width=3,),
+        dbc.Col(dcc.Input(id='t_wnum', type='number', value=state['target_default'], step=0.00001), width=5,),
+        dbc.Col(dbc.Button('Lock  ', id='freq_lock_button', outline=True, color='info',style={'width': '70%'}), width=4),
+    ], class_name = 'mb-4', align='bottom', justify='evenly'),
+
+    dbc.Row([
+        dbc.Col(dcc.Markdown("*_Wavelength Not Locked_*", id="wavelength_locker_status", style={'color': colors['status_inactive'], 'font-weight': 'bolder'}), width=8),
+        dbc.Col(dbc.Button('Unlock', id='freq_unlock_button', outline=True, color='info',style={'width': '70%', 'textAlign': 'center','justifyContent': 'center', 'display': 'flex',}), width=4),
+    ], align='bottom', justify='evenly', class_name='d-flex align-items-center mb-3'),
+
+    html.H4("PID Control", style=text_style['sub_header']),
+    
+    dbc.Row([
+        dbc.Row([
+            dbc.Col([dcc.Slider(id='kp', min=0, max=100, step=0.1, marks={0: '0', 100: '100'}, value=state['kp_default'])],width=8),
+            dbc.Col([dbc.Switch(id='kp_enable', label = 'Enable p', label_style = {'color': colors['label']})], width=4)],
+            align='center', justify='start', class_name='d-flex align-items-center mb-3'
+        ),
+
+        dbc.Row([
+            dbc.Col(dcc.Slider(id='ki', min=0, max=10, step=0.1, marks={0: '0', 10: '10'}, value=state['ki_default']), width=8,),
+            dbc.Col(dbc.Checklist(id='ki_enable', options=[{'label': 'i', 'value': 'ki'}], value=['ki'], inline=True, switch=True, style={'marginTop': '0', 'marginBottom': '0'}), width=4,)],
+            align='center', justify='start', class_name='d-flex align-items-center mb-3'
+        ),
+        
+        dbc.Row([
+            dbc.Col(dcc.Slider(id='kd', min=0, max=10, step=0.1, marks={0: '0', 10: '10'}, value=state['kd_default']), width=8,),
+            dbc.Col(dbc.Checklist(id='kd_enable', options=[{'label': 'd', 'value': 'kd'}], value=['kd'], inline=True, switch=True, style={'marginTop': '0', 'marginBottom': '0'}), width=4,)],
+            align='center', justify='start', class_name='d-flex align-items-center mb-3'
+        ),
+    ]),
+
+    dbc.Row(dbc.Col(dbc.Button('Update', id='pid_update_button', color='info', outline=True), width=6)),
+])
+
+tab1 =  dcc.Tab(children=tab1_content, label='Control', value='tab-1',)
 tab2 = dcc.Tab(label='Scan', value='tab-2')
 tab3 = dcc.Tab(label='Save', value='tab-3')
 sidebar = dcc.Tabs(id='sidebar', value='tab-1', children=[tab1, tab2, tab3],)
@@ -91,60 +177,60 @@ app.layout = dbc.Container(
     [
     title_bar,
     dbc.Row([
-        dbc.Col(sidebar, width=5),
+        dbc.Col(sidebar, width=5, style={"background-color": colors['sidebar_bg']}),
         dbc.Col([
-            dbc.Row([plot], style={'size': 8, 'offset': 2, "display": "flex", "justify-content": "center"}),
+            dbc.Row([plot], style={'size': 8, 'offset': 2, "display": "flex", "justify-content": "center",},),
             html.Br(),
             dbc.Row(
                 [
-                    dbc.Col(html.Div([dcc.Markdown("*Current Wavenumber(cm^-1)*", style={'font-size': '12px', 'color': '#03002e', 'text-align': 'center'}), 
-                             dcc.Markdown('1', id='wnum_display', style={'font-size': '24px', 'font-weight': 'bold', 'text-align': 'center', 'color': '#FA8128',})],
-                             style={'background-color':'#f0f0f0', 'display': 'inline-block',},) 
+                    dbc.Col(html.Div([dcc.Markdown("*Current Wavenumber(cm^-1)*", style={'font-size': '12px', 'color': colors['label'], 'text-align': 'center'}), 
+                             dcc.Markdown('anything', id='wnum_display', style={'font-size': '24px', 'font-weight': 'bold', 'text-align': 'center', 'color': colors['value'],})],
+                             style={'display': 'inline-block',},) 
                             ),
-                    dbc.Col(html.Div([dcc.Markdown("*Reading rate(s)*", style={'font-size': '12px', 'color': '#03002e', 'text-align': 'center'}), 
-                             dcc.Markdown(f'{reading_rate}', style={'font-size': '24px', 'font-weight': 'bold', 'text-align': 'center', 'color': '#FA8128',})],
-                             style={'background-color':'#f0f0f0', 'display': 'inline-block',},)
+                    dbc.Col(html.Div([dcc.Markdown("*Reading rate(s)*", style={'font-size': '12px', 'color': colors['label'], 'text-align': 'center'}), 
+                             dcc.Markdown(f'{reading_rate}', style={'font-size': '24px', 'font-weight': 'bold', 'text-align': 'center', 'color': colors['value'],})],
+                             style={'display': 'inline-block',},)
                              )
-                ], justify='center',)
-                ]),
-            ]),
+                ], justify = 'center')
+                ],style={"background-color": colors['main_bg'],}),
+        ], style={'display': 'flex', 'height': '100vh'},),
     toast,
     refresher
 ], fluid=True)
 
-@app.callback(
-    [Output('wavenumber_vs_time', 'figure'),
-     Output('wnum_display', 'children')],
-    Input('interval-component', 'n_intervals'))
-def update_plot(n_intervals):
-    """Loop function that updates the current wavenumber and plot continuously in the while loop
+# @app.callback(
+#     [Output('wavenumber_vs_time', 'figure'),
+#      Output('wnum_display', 'children')],
+#     Input('interval-component', 'n_intervals'))
+# def update_plot(n_intervals):
+#     """Loop function that updates the current wavenumber and plot continuously in the while loop
     
-    Args:
-        plot(placeholder): Placeholder for the plot
-        dataf_space(placeholder: Placeholder for the current wavenumber)
-    """
-    try:
-        xtoPlot, ytoPlot = control_loop.get_df_to_plot()
-        control_loop.update()
-        c_wnum = get_cwnum()
-        c_wnum = str(c_wnum)
-    except Exception as e:
-        error(e, 'Error in getting plot data', 'warning')
-        set_props('toast', {'header': 'Error in getting plot data', 'children': f"Error: {e} \n {traceback.format_exc()}"})
-    # Time series plot
-    if xtoPlot and ytoPlot:
-        fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(255,77,1, 1)')), layout=go.Layout(
-            xaxis=dict(title="Time(s)"), yaxis=dict(title="Wavenumber (cm^-1)", exponentformat="none"), uirevision=True
-            ))
-        fig.update_xaxes(showgrid=True, gridwidth=1, griddash='dash', minor_griddash="dot", gridcolor='Blue')
-        # if state.freq_lock_clicked or state.scan_button:
-        #     y_ref = control_loop.target
-        #     y_lower = y_ref - 0.00002
-        #     y_upper = y_ref + 0.00002
-        #     fig.add_hrect(y0=y_lower, y1=y_upper, line_width=0, fillcolor="LightPink", opacity=0.5)
+#     Args:
+#         plot(placeholder): Placeholder for the plot
+#         dataf_space(placeholder: Placeholder for the current wavenumber)
+#     """
+#     try:
+#         xtoPlot, ytoPlot = control_loop.get_df_to_plot()
+#         control_loop.update()
+#         c_wnum = get_cwnum()
+#         c_wnum = str(c_wnum)
+#     except Exception as e:
+#         error(e, 'Error in getting plot data', 'warning')
+#         set_props('toast', {'header': 'Error in getting plot data', 'children': f"Error: {e} \n {traceback.format_exc()}"})
+#     # Time series plot
+#     if xtoPlot and ytoPlot:
+#         fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(255,77,1, 1)')), layout=go.Layout(
+#             xaxis=dict(title="Time(s)"), yaxis=dict(title="Wavenumber (cm^-1)", exponentformat="none"), uirevision=True, paper_bgcolor=colors['main_bg'], plot_bgcolor=colors['sidebar_bg'],  
+#             ))
+#         fig.update_xaxes(showgrid=True, gridwidth=1, griddash='dash', minor_griddash="dot", gridcolor='Blue')
+#         # if state.freq_lock_clicked or state.scan_button:
+#         #     y_ref = control_loop.target
+#         #     y_lower = y_ref - 0.00002
+#         #     y_upper = y_ref + 0.00002
+#         #     fig.add_hrect(y0=y_lower, y1=y_upper, line_width=0, fillcolor="LightPink", opacity=0.5)
 
-    # dataf_space.metric(label="Current Wavenumber", value=state.c_wnum)
-    return fig, c_wnum
+#     # dataf_space.metric(label="Current Wavenumber", value=state.c_wnum)
+#     return fig, c_wnum
 
 def main():
     try:
@@ -154,4 +240,4 @@ def main():
         print(1)
 
 if __name__ == "__main__":
-    main()
+    app.run(debug=True, dev_tools_hot_reload=False)
