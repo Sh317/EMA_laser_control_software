@@ -1,3 +1,7 @@
+:root{
+  --custom-blue: #00008b;
+}
+
 .btn-outline-info {
     --bs-btn-color: #00008b;
     --bs-btn-border-color: #00008b;
@@ -13,4 +17,33 @@
     --bs-btn-disabled-bg: transparent;
     --bs-btn-disabled-border-color: #9c9c9f;
     --bs-gradient: none;
-  }
+}
+
+.rc-slider-track {
+    background-color: var(--custom-blue);
+}
+
+.rc-slider-handle {
+  border: solid 2px var(--custom-blue)
+}
+
+.rc-slider-handle-click-focused:focus {
+  border-color: var(--custom-blue);
+}
+
+.rc-slider-dot-active {
+  border-color: var(--custom-blue);
+  border: solid 2px var(--custom-blue);
+}
+
+.rc-slider-handle:hover {
+  border-color: var(--custom-blue);
+}
+
+.rc-slider-handle-active:active {
+  border-color: var(--custom-blue);
+}
+
+.dash-input{
+  border: 1pt
+}

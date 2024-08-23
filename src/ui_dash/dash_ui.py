@@ -3,12 +3,11 @@ from dash import dcc, html, Input, Output, State, set_props
 import dash_bootstrap_components as dbc
 import sys
 import os
-import wx
 import time
 import traceback
 import plotly.graph_objects as go
 
-sys.path.append('.\\src')
+sys.path.append('./src')
 from control.st_laser_control import LaserControl
 
 def patient_netconnect(tryouts=10):
@@ -46,13 +45,13 @@ def error(error, header, icon):
 
 
 
-# patient_netconnect()
-# reading_rate = get_rate()
+patient_netconnect()
+reading_rate = get_rate()
 reading_rate = 0.1
 
 
 
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.LUX])
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.LUX, dbc.icons.FONT_AWESOME])
 
 colors = {'sidebar_bg': "#D3D3D3",
           'main_bg': "#f8f9fa",
@@ -109,13 +108,13 @@ tab1_content = dbc.Container([
 
     dbc.Row([
         dbc.Col(dcc.Markdown("**Cavity**", style=text_style['label']), width=3),
-        dbc.Col(dbc.Button(id='cavity_lock_button', children=str(state['cavity_lock'])), width=3),
+        dbc.Col(dbc.Button(html.I(className='fa-solid fa-lock', style={'color': colors['label'], 'color:hover': '#fff'}), id='cavity_lock_button', outline=True, color='info'), width=3),
         dbc.Col(dcc.Input(id='cavity_tuner', type='number', value=state['cavity_tuner_value'], step=0.0001), width=6),
     ], align='center', justify='evenly'),
 
     html.Br(),
 
-    html.H4("Wavelength Locker", style=text_style['sub_header']),
+    html.H4("Wavelength Locker", style=text_style['sub_header'], className="mb-4"),
     
     dbc.Row([
         dbc.Col(dcc.Markdown("Target Wavenumber", style=text_style['label']), width=3,),
@@ -125,28 +124,28 @@ tab1_content = dbc.Container([
 
     dbc.Row([
         dbc.Col(dcc.Markdown("*_Wavelength Not Locked_*", id="wavelength_locker_status", style={'color': colors['status_inactive'], 'font-weight': 'bolder'}), width=8),
-        dbc.Col(dbc.Button('Unlock', id='freq_unlock_button', outline=True, color='info',style={'width': '70%', 'textAlign': 'center','justifyContent': 'center', 'display': 'flex',}), width=4),
+        dbc.Col(dbc.Button('Unlock', id='freq_unlock_button', outline=True, disabled=True, color='info',style={'width': '70%', 'textAlign': 'center','justifyContent': 'center', 'display': 'flex',}), width=4),
     ], align='bottom', justify='evenly', class_name='d-flex align-items-center mb-3'),
 
     html.H4("PID Control", style=text_style['sub_header']),
     
     dbc.Row([
         dbc.Row([
-            dbc.Col([dcc.Slider(id='kp', min=0, max=100, step=0.1, marks={0: '0', 100: '100'}, value=state['kp_default'])],width=8),
-            dbc.Col([dbc.Switch(id='kp_enable', label = 'Enable p', label_style = {'color': colors['label']})], width=4)],
-            align='center', justify='start', class_name='d-flex align-items-center mb-3'
+            dbc.Col([dcc.Slider(id='kp', min=0, max=100, step=0.1, marks={0: {'label':'0', 'style': {'color': colors['label']}}, 100: {'label':'100', 'style': {'color': colors['label']}}}, value=state['kp_default'], tooltip={"placement": "bottom", "always_visible": True,})],width=8),
+            dbc.Col([dbc.Switch(id='kp_enable', label = 'p', label_style = {'color': colors['label']})], width=4)],
+            align='center', justify='start', class_name='d-flex align-items-center mb-4'
         ),
 
         dbc.Row([
-            dbc.Col(dcc.Slider(id='ki', min=0, max=10, step=0.1, marks={0: '0', 10: '10'}, value=state['ki_default']), width=8,),
-            dbc.Col(dbc.Checklist(id='ki_enable', options=[{'label': 'i', 'value': 'ki'}], value=['ki'], inline=True, switch=True, style={'marginTop': '0', 'marginBottom': '0'}), width=4,)],
-            align='center', justify='start', class_name='d-flex align-items-center mb-3'
+            dbc.Col(dcc.Slider(id='ki', min=0, max=10, step=0.1, marks={0: {'label':'0', 'style': {'color': colors['label']}}, 10: {'label':'10', 'style': {'color': colors['label']}}}, value=state['ki_default'], tooltip={"placement": "bottom", "always_visible": True,}), width=8,),
+            dbc.Col([dbc.Switch(id='ki_enable', label = 'i', label_style = {'color': colors['label']})], width=4)],
+            align='center', justify='start', class_name='d-flex align-items-center mb-4'
         ),
         
         dbc.Row([
-            dbc.Col(dcc.Slider(id='kd', min=0, max=10, step=0.1, marks={0: '0', 10: '10'}, value=state['kd_default']), width=8,),
-            dbc.Col(dbc.Checklist(id='kd_enable', options=[{'label': 'd', 'value': 'kd'}], value=['kd'], inline=True, switch=True, style={'marginTop': '0', 'marginBottom': '0'}), width=4,)],
-            align='center', justify='start', class_name='d-flex align-items-center mb-3'
+            dbc.Col(dcc.Slider(id='kd', min=0, max=10, step=0.1, marks={0: {'label':'0', 'style': {'color': colors['label']}}, 10: {'label':'10', 'style': {'color': colors['label']}}}, value=state['kd_default'], tooltip={"placement": "bottom", "always_visible": True,}), width=8,),
+            dbc.Col([dbc.Switch(id='kd_enable', label = 'd', label_style = {'color': colors['label']})], width=4)],
+            align='center', justify='start', class_name='d-flex align-items-center mb-4'
         ),
     ]),
 
@@ -198,39 +197,39 @@ app.layout = dbc.Container(
     refresher
 ], fluid=True)
 
-# @app.callback(
-#     [Output('wavenumber_vs_time', 'figure'),
-#      Output('wnum_display', 'children')],
-#     Input('interval-component', 'n_intervals'))
-# def update_plot(n_intervals):
-#     """Loop function that updates the current wavenumber and plot continuously in the while loop
+@app.callback(
+    [Output('wavenumber_vs_time', 'figure'),
+     Output('wnum_display', 'children')],
+    Input('interval-component', 'n_intervals'))
+def update_plot(n_intervals):
+    """Loop function that updates the current wavenumber and plot continuously in the while loop
     
-#     Args:
-#         plot(placeholder): Placeholder for the plot
-#         dataf_space(placeholder: Placeholder for the current wavenumber)
-#     """
-#     try:
-#         xtoPlot, ytoPlot = control_loop.get_df_to_plot()
-#         control_loop.update()
-#         c_wnum = get_cwnum()
-#         c_wnum = str(c_wnum)
-#     except Exception as e:
-#         error(e, 'Error in getting plot data', 'warning')
-#         set_props('toast', {'header': 'Error in getting plot data', 'children': f"Error: {e} \n {traceback.format_exc()}"})
-#     # Time series plot
-#     if xtoPlot and ytoPlot:
-#         fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(255,77,1, 1)')), layout=go.Layout(
-#             xaxis=dict(title="Time(s)"), yaxis=dict(title="Wavenumber (cm^-1)", exponentformat="none"), uirevision=True, paper_bgcolor=colors['main_bg'], plot_bgcolor=colors['sidebar_bg'],  
-#             ))
-#         fig.update_xaxes(showgrid=True, gridwidth=1, griddash='dash', minor_griddash="dot", gridcolor='Blue')
-#         # if state.freq_lock_clicked or state.scan_button:
-#         #     y_ref = control_loop.target
-#         #     y_lower = y_ref - 0.00002
-#         #     y_upper = y_ref + 0.00002
-#         #     fig.add_hrect(y0=y_lower, y1=y_upper, line_width=0, fillcolor="LightPink", opacity=0.5)
+    Args:
+        plot(placeholder): Placeholder for the plot
+        dataf_space(placeholder: Placeholder for the current wavenumber)
+    """
+    try:
+        xtoPlot, ytoPlot = control_loop.get_df_to_plot()
+        control_loop.update()
+        c_wnum = get_cwnum()
+        c_wnum = str(c_wnum)
+    except Exception as e:
+        error(e, 'Error in getting plot data', 'warning')
+        set_props('toast', {'header': 'Error in getting plot data', 'children': f"Error: {e} \n {traceback.format_exc()}"})
+    # Time series plot
+    if xtoPlot and ytoPlot:
+        fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(255,77,1, 1)')), layout=go.Layout(
+            xaxis=dict(title="Time(s)"), yaxis=dict(title="Wavenumber (cm^-1)", exponentformat="none"), uirevision=True, paper_bgcolor=colors['main_bg'], plot_bgcolor=colors['sidebar_bg'],  
+            ))
+        fig.update_xaxes(showgrid=True, gridwidth=1, griddash='dash', minor_griddash="dot", gridcolor='Blue')
+        # if state.freq_lock_clicked or state.scan_button:
+        #     y_ref = control_loop.target
+        #     y_lower = y_ref - 0.00002
+        #     y_upper = y_ref + 0.00002
+        #     fig.add_hrect(y0=y_lower, y1=y_upper, line_width=0, fillcolor="LightPink", opacity=0.5)
 
-#     # dataf_space.metric(label="Current Wavenumber", value=state.c_wnum)
-#     return fig, c_wnum
+    # dataf_space.metric(label="Current Wavenumber", value=state.c_wnum)
+    return fig, c_wnum
 
 def main():
     try:
@@ -240,4 +239,4 @@ def main():
         print(1)
 
 if __name__ == "__main__":
-    app.run(debug=True, dev_tools_hot_reload=False)
+    app.run(debug=True, host='0.0.0.0', port=2355)
