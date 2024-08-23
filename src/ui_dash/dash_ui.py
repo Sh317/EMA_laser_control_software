@@ -7,8 +7,23 @@ import time
 import traceback
 import plotly.graph_objects as go
 
-sys.path.append('./src')
-from control.st_laser_control import LaserControl
+# sys.path.append('.\\src')
+# from control.st_laser_control import LaserControl
+
+state = {
+    'etalon_lock': True,
+    'etalon_tuner_value': 0.0,
+    'cavity_lock': True,
+    'cavity_tuner_value': 0.0,
+    'target_default': 0.0,
+    'freq_lock_clicked': False,
+    'kp_enable': True,
+    'ki_enable': True,
+    'kd_enable': True,
+    'kp_default': 0.0,
+    'ki_default': 0.0,
+    'kd_default': 0.0
+}
 
 def patient_netconnect(tryouts=10):
     """Try to instantiate the laser class if this is the first call, otherwise inherit the properties.
@@ -39,14 +54,34 @@ def get_cwnum():
     """Get current wavenumber"""
     return control_loop.get_current_wnum()
 
+def get_etalon_lock_status():
+    """Gets etalon lock status, returns corresponding boolean value, and raises an error if there is lock error
+    
+    Return:
+        bool: True if etalon lock is on and false otherwise.
+    """
+    e_status = control_loop.etalon_lock_status
+    assert isinstance(e_status, str) and e_status in ["on", "off"], f"Invalid etalon lock status: {e_status}"
+    return True if  e_status == "on" else False
+
+def get_cavity_lock_status():
+    """Gets cavity lock status, returns corresponding boolean value, and raises an error if there is lock error
+    
+    Return:
+        bool: True if cavity lock is on and false otherwise.
+    """
+    c_status = control_loop.reference_cavity_lock_status
+    assert isinstance(c_status, str) and c_status in ["on", "off"], f"Invalid cavity lock status: {c_status}"
+    return True if  c_status == "on" else False
+
 def error(error, header, icon):
     set_props('toast', {'header': f'{header}', 'children': f"Error: {error} \n {traceback.format_exc()}", 'icon': f'{icon}'})
 
 
 
 
-patient_netconnect()
-reading_rate = get_rate()
+# patient_netconnect()
+# reading_rate = get_rate()
 reading_rate = 0.1
 
 
@@ -63,20 +98,6 @@ colors = {'sidebar_bg': "#D3D3D3",
 
 text_style = {'sub_header': {'fontSize': '18px','fontWeight': 'bold','padding': '14px 0'},
               'label': {'fontSize': '14px','fontWeight': 'bold', 'color': colors['label']}}
-state = {
-    'etalon_lock': False,
-    'etalon_tuner_value': 0.0,
-    'cavity_lock': False,
-    'cavity_tuner_value': 0.0,
-    'target_default': 0.0,
-    'freq_lock_clicked': False,
-    'kp_enable': True,
-    'ki_enable': True,
-    'kd_enable': True,
-    'kp_default': 0.0,
-    'ki_default': 0.0,
-    'kd_default': 0.0
-}
 
 title_bar = dbc.Navbar(
         dbc.Container([
@@ -100,7 +121,7 @@ tab1_content = dbc.Container([
     
     dbc.Row([
         dbc.Col(dcc.Markdown("**Etalon**", style=text_style['label']), width=3,),
-        dbc.Col(dbc.Button(id='etalon_lock_button', children=str(state['etalon_lock'])), width=3,),
+        dbc.Col(dbc.Button(html.I(className='fa-solid fa-lock fa-fw', id='etalon_lock_icon',), id='etalon_lock_button', outline=True, color='info'), width=3,),
         dbc.Col(dcc.Input(id='etalon_tuner', type='number', value=state['etalon_tuner_value'], step=0.00001), width=6,),
     ], align='center', justify='evenly'),
 
@@ -108,7 +129,7 @@ tab1_content = dbc.Container([
 
     dbc.Row([
         dbc.Col(dcc.Markdown("**Cavity**", style=text_style['label']), width=3),
-        dbc.Col(dbc.Button(html.I(className='fa-solid fa-lock', style={'color': colors['label'], 'color:hover': '#fff'}), id='cavity_lock_button', outline=True, color='info'), width=3),
+        dbc.Col(dbc.Button(html.I(className='fa-solid fa-lock fa-fw', id='cavity_lock_icon',), id='cavity_lock_button', outline=True, color='info'), width=3,),
         dbc.Col(dcc.Input(id='cavity_tuner', type='number', value=state['cavity_tuner_value'], step=0.0001), width=6),
     ], align='center', justify='evenly'),
 
@@ -198,38 +219,97 @@ app.layout = dbc.Container(
 ], fluid=True)
 
 @app.callback(
-    [Output('wavenumber_vs_time', 'figure'),
-     Output('wnum_display', 'children')],
-    Input('interval-component', 'n_intervals'))
-def update_plot(n_intervals):
-    """Loop function that updates the current wavenumber and plot continuously in the while loop
-    
-    Args:
-        plot(placeholder): Placeholder for the plot
-        dataf_space(placeholder: Placeholder for the current wavenumber)
-    """
-    try:
-        xtoPlot, ytoPlot = control_loop.get_df_to_plot()
-        control_loop.update()
-        c_wnum = get_cwnum()
-        c_wnum = str(c_wnum)
-    except Exception as e:
-        error(e, 'Error in getting plot data', 'warning')
-        set_props('toast', {'header': 'Error in getting plot data', 'children': f"Error: {e} \n {traceback.format_exc()}"})
-    # Time series plot
-    if xtoPlot and ytoPlot:
-        fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(255,77,1, 1)')), layout=go.Layout(
-            xaxis=dict(title="Time(s)"), yaxis=dict(title="Wavenumber (cm^-1)", exponentformat="none"), uirevision=True, paper_bgcolor=colors['main_bg'], plot_bgcolor=colors['sidebar_bg'],  
-            ))
-        fig.update_xaxes(showgrid=True, gridwidth=1, griddash='dash', minor_griddash="dot", gridcolor='Blue')
-        # if state.freq_lock_clicked or state.scan_button:
-        #     y_ref = control_loop.target
-        #     y_lower = y_ref - 0.00002
-        #     y_upper = y_ref + 0.00002
-        #     fig.add_hrect(y0=y_lower, y1=y_upper, line_width=0, fillcolor="LightPink", opacity=0.5)
+    Output('etalon_lock_icon', 'className'),
+    Input('etalon_lock_button', 'n_clicks'),
+)
+def lock_etalon(n_clicks):
+    """Lock etalon if it's unlocked and unlock otherwise"""
+    for tries in range(2):
+        try:
+            # if get_etalon_lock_status():
+            #     control_loop.unlock_reference_etalon()
+            #     return 'fa-solid fa-lock-open fa-fw'
+            # else:
+            #     control_loop.lock_reference_etalon()
+            #     return 'fa-solid fa-lock fa-fw'
+            if state['etalon_lock']:
+                state['etalon_lock'] = False
+                print('Etalon unlocked')
+                return 'fa-solid fa-lock-open fa-fw'
+            else:
+                state['etalon_lock'] = True
+                print('Etalon locked')
+                return 'fa-solid fa-lock fa-fw'
+        except Exception as e:
+            if tries >= 2:
+                error(e, 'Error in locking etalon', 'warning')
+                break
+            tries += 1
+            print(f"Error in locking etalon: {e}")
+            time.sleep(0.5)
 
-    # dataf_space.metric(label="Current Wavenumber", value=state.c_wnum)
-    return fig, c_wnum
+@app.callback(
+        output=Output('cavity_lock_icon', 'className'),
+        inputs=Input('cavity_lock_button', 'n_clicks'),
+)
+def lock_cavity(n_clicks):
+    """Lock cavity if it's unlocked and unlock otherwise"""
+    for tries in range(2):
+        try:
+            # if get_cavity_lock_status():
+            #     control_loop.unlock_reference_cavity()
+            #     return 'fa-solid fa-lock-open fa-fw'
+            # else:
+            #     control_loop.lock_reference_cavity()
+            #     return 'fa-solid fa-lock fa-fw'
+            if state['cavity_lock']:
+                state['cavity_lock'] = False
+                print('Cavity unlocked')
+                return 'fa-solid fa-lock-open fa-fw'
+            else:
+                state['cavity_lock'] = True
+                print('Cavity locked')
+                return 'fa-solid fa-lock fa-fw'
+        except Exception as e:
+            if tries >= 2:
+                error(e, 'Error in locking reference cavity', 'warning')
+                break
+            tries += 1
+            print(f"Error in locking cavity: {e}")
+            time.sleep(0.5)
+
+# @app.callback(
+#     [Output('wavenumber_vs_time', 'figure'),
+#      Output('wnum_display', 'children')],
+#     Input('interval-component', 'n_intervals'))
+# def update_plot(n_intervals):
+#     """Loop function that updates the current wavenumber and plot continuously in the while loop
+    
+#     Args:
+#         plot(placeholder): Placeholder for the plot
+#         dataf_space(placeholder: Placeholder for the current wavenumber)
+#     """
+#     try:
+#         xtoPlot, ytoPlot = control_loop.get_df_to_plot()
+#         control_loop.update()
+#         c_wnum = get_cwnum()
+#         c_wnum = str(c_wnum)
+#     except Exception as e:
+#         error(e, 'Error in getting plot data', 'warning')
+#     # Time series plot
+#     if xtoPlot and ytoPlot:
+#         fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(255,77,1, 1)')), layout=go.Layout(
+#             xaxis=dict(title="Time(s)"), yaxis=dict(title="Wavenumber (cm^-1)", exponentformat="none"), uirevision=True, paper_bgcolor=colors['main_bg'], plot_bgcolor=colors['sidebar_bg'],  
+#             ))
+#         fig.update_xaxes(showgrid=True, gridwidth=1, griddash='dash', minor_griddash="dot", gridcolor='Blue')
+#         # if state.freq_lock_clicked or state.scan_button:
+#         #     y_ref = control_loop.target
+#         #     y_lower = y_ref - 0.00002
+#         #     y_upper = y_ref + 0.00002
+#         #     fig.add_hrect(y0=y_lower, y1=y_upper, line_width=0, fillcolor="LightPink", opacity=0.5)
+
+#     # dataf_space.metric(label="Current Wavenumber", value=state.c_wnum)
+#     return fig, c_wnum
 
 def main():
     try:
