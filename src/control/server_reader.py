@@ -247,6 +247,20 @@ class EMAServerReader:
             list: y data - wavenumber
         """
         return self.xDat, self.yDat
+
+    def get_last_plot_data(self):
+        """Get the last data point for Plot
+        
+        Returns:
+            list: x data - time stamp
+            list: y data - wavenumber
+        """
+        if self.xDat and self.yDat:
+            return self.xDat[-1], self.yDat[-1]
+        else:
+            if self.verbose:
+                print("No data to plot.")
+            return None, None
     
     def clear_plot(self):
         """Clear the plot"""
