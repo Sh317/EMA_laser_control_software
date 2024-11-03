@@ -1,3 +1,4 @@
+#! C:\Users\EMA LAB laser\Documents\laser_control_system\venv\Scripts\python.exe
 import streamlit as st
 import sys
 import os

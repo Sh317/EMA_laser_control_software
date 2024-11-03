@@ -297,7 +297,7 @@ tab3_content = dbc.Container([
     html.Br(),
 
     dbc.Row([
-        dbc.Col(dbc.Button('Select Directory', id='dir_select_button', outline=True, color='info',style={'width': '70%', 'textAlign': 'center','justifyContent': 'center', 'display': 'flex',}), width=4),
+        dbc.Col(dbc.Input(id="dir", type="text", placeholder="Enter the full path...", class_name="p-2", style={'width': '100%', 'font-weight': 'bolder', 'color': colors['label']})),
         dbc.Col(dcc.Markdown("", id="dir_status", style={'color': colors['status_inactive'], 'font-weight': 'bolder',}), width=8, class_name='mt-3'),
         ]),
     
@@ -345,8 +345,9 @@ app.layout = dbc.Container(
                     dbc.Col(html.Div([dcc.Markdown("*Reading rate(s)*", style={'font-size': '12px', 'color': colors['label'], 'text-align': 'center'}), 
                              dcc.Markdown(f'{reading_rate}', style={'font-size': '24px', 'font-weight': 'bold', 'text-align': 'center', 'color': colors['value'],})],
                              style={'display': 'inline-block',},)
-                             )
-                ], justify = 'center')
+                             ),
+                    dbc.Col(dbc.Button('Clear Plot', id='clear_plot_button', outline=True, color='info',style={'width': '70%'}), width=4),
+                ], align = 'center')
                 ],style={"background-color": colors['main_bg'],}),
         ], style={'display': 'flex', 'height': '100vh'},),
     toast,
@@ -364,6 +365,14 @@ app.layout = dbc.Container(
 #         return tab2_content
 #     elif tab == 'tab-3':
 #         return tab3_content
+
+@app.callback(
+    Input("clear_plot_button", "n_clicks"),
+    prevent_initial_call=True
+)
+def clear_plot():
+    """Clear plot"""
+    control_loop.clear_plot()
 
 @app.callback(
     Output("scan_info_collapse", "is_open"),
@@ -425,20 +434,20 @@ def lock_etalon(n_clicks):
     """Lock etalon if it's unlocked and unlock otherwise"""
     for tries in range(2):
         try:
-            # if get_etalon_lock_status():
-            #     control_loop.unlock_reference_etalon()
-            #     return 'fa-solid fa-lock-open fa-fw'
-            # else:
-            #     control_loop.lock_reference_etalon()
-            #     return 'fa-solid fa-lock fa-fw'
-            if state['etalon_lock']:
-                state['etalon_lock'] = False
-                print('Etalon unlocked')
+            if get_etalon_lock_status():
+                control_loop.unlock_reference_etalon()
                 return 'fa-solid fa-lock-open fa-fw'
             else:
-                state['etalon_lock'] = True
-                print('Etalon locked')
+                control_loop.lock_reference_etalon()
                 return 'fa-solid fa-lock fa-fw'
+            # if state['etalon_lock']:
+            #     state['etalon_lock'] = False
+            #     print('Etalon unlocked')
+            #     return 'fa-solid fa-lock-open fa-fw'
+            # else:
+            #     state['etalon_lock'] = True
+            #     print('Etalon locked')
+            #     return 'fa-solid fa-lock fa-fw'
         except Exception as e:
             if tries >= 2:
                 error(e, 'Error in locking etalon', 'warning')
@@ -456,20 +465,20 @@ def lock_cavity(n_clicks):
     """Lock cavity if it's unlocked and unlock otherwise"""
     for tries in range(2):
         try:
-            # if get_cavity_lock_status():
-            #     control_loop.unlock_reference_cavity()
-            #     return 'fa-solid fa-lock-open fa-fw'
-            # else:
-            #     control_loop.lock_reference_cavity()
-            #     return 'fa-solid fa-lock fa-fw'
-            if state['cavity_lock']:
-                state['cavity_lock'] = False
-                print('Cavity unlocked')
+            if get_cavity_lock_status():
+                control_loop.unlock_reference_cavity()
                 return 'fa-solid fa-lock-open fa-fw'
             else:
-                state['cavity_lock'] = True
-                print('Cavity locked')
+                control_loop.lock_reference_cavity()
                 return 'fa-solid fa-lock fa-fw'
+            # if state['cavity_lock']:
+            #     state['cavity_lock'] = False
+            #     print('Cavity unlocked')
+            #     return 'fa-solid fa-lock-open fa-fw'
+            # else:
+            #     state['cavity_lock'] = True
+            #     print('Cavity locked')
+            #     return 'fa-solid fa-lock fa-fw'
         except Exception as e:
             if tries >= 2:
                 error(e, 'Error in locking reference cavity', 'warning')
@@ -499,24 +508,23 @@ def freq_lock(lock_n_clicks, unlock_n_clicks, t_wnum, c_wnum):
             raise_toast('WARNING', 'You are trying to tune cavity for more than 0.1 cm^-1', 'danger')
             return no_update, no_update, no_update
         else:
-            # if get_cavity_lock_status() and get_etalon_lock_status():
-            #     control_loop.lock(t_wnum)
-            #     print('Wavelength locked')
+            if get_cavity_lock_status() and get_etalon_lock_status():
+                control_loop.lock(t_wnum)
+                print('Wavelength locked')
+                # state["centroid_wnum_default"] = state.t_wnu
+                raise_toast("Notification", "Wavelength locked!", 'success')
+                return False, "*_Wavelength lock in progress!_*", {'color': colors['status_warning'], 'font-weight': 'bolder'}
+            # if state['cavity_lock'] and state['etalon_lock']:
             #     # state["centroid_wnum_default"] = state.t_wnum
             #     #Flag
-            #     raise_toast("Notification", "Wavelength locked!", 'success')
+            #     raise_toast("Status Update", "Wavelength locked!", 'success')
             #     return False, "*_Wavelength lock in progress!_*", {'color': colors['status_warning'], 'font-weight': 'bolder'}
-            if state['cavity_lock'] and state['etalon_lock']:
-                # state["centroid_wnum_default"] = state.t_wnum
-                #Flag
-                raise_toast("Status Update", "Wavelength locked!", 'success')
-                return False, "*_Wavelength lock in progress!_*", {'color': colors['status_warning'], 'font-weight': 'bolder'}
-            else:
+            # else:
                 control_loop.unlock()
                 raise_toast("WARNING", "Something is not locked", 'warninng')
                 return no_update, no_update, no_update
     if button_id == 'freq_unlock_button':
-        # control_loop.unlock()
+        control_loop.unlock()
         raise_toast("Status Update", "Wavelength unlocked!", "success")
         return True, "*_Wavelength Not Locked_*", {'color': colors['status_inactive'], 'font-weight': 'bolder'}
 
@@ -566,15 +574,14 @@ def pid_update(n_clicks, kp_enable, ki_enable, kd_enable, kp, ki, kd):
     """Update the PID controller gains"""
     if kp_enable:
         print('Proportional gain enabled')
-        # control_loop.p_update(kp)
+        control_loop.p_update(kp)
     if ki_enable:
         print('Integral gain enabled')
-        # control_loop.i_update(ki)
+        control_loop.i_update(ki)
     if kd_enable:
         print('Derivative gain enabled')
-        # control_loop.d_update(kd)
+        control_loop.d_update(kd)
     print(f'PID update button clicked with {kp}, {ki}, {kd}')
-
 
 @app.callback(
         Output('update_time_per_step', 'disabled'),
@@ -603,7 +610,7 @@ def start_scan(start_wnum, end_wnum, no_of_steps, c_wnum):
     """Start scanning based on numbers in the widgets if laser frequency is not locked"""
     start_wnum, end_wnum, no_of_steps, c_wnum = float(start_wnum), float(end_wnum), int(no_of_steps), float(c_wnum)
     wnum_per_scan = (end_wnum - start_wnum) / no_of_steps
-    #freq_lock_running = control_loop.state
+    freq_lock_running = control_loop.state
     freq_lock_running = state['state']
 
     if wnum_per_scan >= 0.1:
@@ -614,7 +621,7 @@ def start_scan(start_wnum, end_wnum, no_of_steps, c_wnum):
         return no_update, no_update, no_update, no_update, no_update
     else:               
         if freq_lock_running != 1:
-            #control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan, state.no_of_passes)
+            control_loop.start_scan(state.start_wnum, state.end_wnum, state.no_of_steps, state.time_per_scan, state.no_of_passes)
             #state.scan = 1
             raise_toast("Status Update", "Scan Started!", 'success')
             scan_text = "_*Scan in Progress !*_"
@@ -627,31 +634,28 @@ def start_scan(start_wnum, end_wnum, no_of_steps, c_wnum):
 
 def stop_scan():
     """Stop the current scan"""
-    #control_loop.stop_scan()
+    control_loop.stop_scan()
     # state.scan = 0
     scan_text = "_*Scan is Forcibly Stopped !*_"
     scan_text_style={'color': colors['status_warning'], 'font-weight': 'bold', 'font-size': '18px',}
     raise_toast('WARNING', 'Scan stopped!', 'danger')
     return True, False, True, scan_text, scan_text_style
 
-@app.callback(
-    Output('dir_status', 'children'),
-    Output('dir_status', 'style'),
-    Output('memory', 'data'),
-    Input('dir_select_button', 'n_clicks'),
-    prevent_initial_call=True,
-)
-def dir_select(n_clicks):
-    """Open a directory picker using wx"""
-    directory = open_directory_dialog()
-    if directory:
-        exist_style = {'color': colors['value'], 'font-weight': 'bolder',}
-        dir_on_memory = {'dir_to_save': directory}
-        dir_on_memory_json = json.dumps(dir_on_memory)
-        return f"Selected directory: _{directory}_", exist_style, dir_on_memory_json
-    else:
-        empty_style = {'color': colors['status_warning'], 'font-weight': 'bolder',}
-        return "_No directory selected._]", empty_style, no_update
+# @app.callback(
+#     Output('dir_status', 'children'),
+#     Output('dir_status', 'style'),
+#     Input('dir_select_button', 'n_clicks'),
+#     prevent_initial_call=True,
+# )
+# def dir_select(n_clicks):
+#     """Open a directory picker using wx"""
+#     directory = open_directory_dialog()
+#     if directory:
+#         exist_style = {'color': colors['value'], 'font-weight': 'bolder',}
+#         return f"Selected directory: _{directory}_", exist_style
+#     else:
+#         empty_style = {'color': colors['status_warning'], 'font-weight': 'bolder',}
+#         return "_No directory selected._]", empty_style
 
 def open_directory_dialog():
     """Create a directory picker using wx"""
@@ -667,131 +671,153 @@ def open_directory_dialog():
 @app.callback(
     Output('dir_status', 'children'),
     Output('dir_status', 'style'),
+    Output('save_button', 'disabled'),
+    Output('stop_save_button', 'disabled'),
     Input('save_button', 'n_clicks'),
-    Input('stop_save_button', 'children'),
+    Input('stop_save_button', 'n_clicks'),
     State('file_name', 'value'),
-    State('memory', 'data'),
+    State('dir', 'value'),
     prevent_initial_call=True,)
-def save_data(save_n_clicks, stop_save_n_clicks, file_name, memory_json):
-    stored_data = json.loads(memory_json)
-    directory = stored_data.get('dir_to_save')
+def save_data(save_n_clicks, stop_save_n_clicks, file_name, dir):
     button_id = ctx.triggered_id
     
     if button_id =='save_button':
-        if directory and file_name:
-            success_msg = f"_Data automatically being saved to {directory}_"
+        if dir and file_name:
+            print(dir)
+            #start_saving(file_name, dir)
+            success_msg = f"_Data automatically being saved to {dir}_"
             success_style = {'color': colors['success'], 'font-weight': 'bolder',}
-            return success_msg, success_style
+            return success_msg, success_style, True, False
         else: 
             fail_msg = "_No filename/directory specified._"
             fail_style = {'color': colors['status_warning'], 'font-weight': 'bolder',}
-            return fail_msg, fail_style
+            return fail_msg, fail_style, no_update, no_update
+        
     if button_id =='stop_save_button':
-        stopped_msg = f"_Data stopped saving to {directory}_"
+        #stop_saving()
+        stopped_msg = f"_Data stopped saving to {dir}_"
         stopped_style = {'color': colors['label'], 'font-weight': 'bolder',}
-        # state.dialog_dir = None
-        return stopped_msg, stopped_style
+        return stopped_msg, stopped_style, False, True
+
+def start_saving(name, path):
+    """Start saving data on teh background
+    
+    Args:
+        name(str): Filename
+        path(str): Location to save file to
+    """
+    filename = f"{name}.csv"
+    filepath = os.path.join(path, filename)
+    control_loop.start_backup_saving(filepath)
+
+def stop_saving():
+    """Stop saving data on the background"""
+    control_loop.stop_backup_saving()
 
 @app.callback(
-        Input('update_time_per_step', 'n_clicks'),
-        State('time_per_scan', 'value'),
-        prevent_initial_call=True,)
+    Input('update_time_per_step', 'n_clicks'),
+    State('time_per_scan', 'value'),
+    prevent_initial_call=True,)
 def update_time_per_step(n_clicks, new_time_per_scan):
     """Update time per scan based on number in the widget"""
     raise_toast("Status Update", "PID Parameters Updated!", 'success')
-    #control_loop.scan_update(new_time_per_scan)
+    control_loop.scan_update(new_time_per_scan)
 
-# @app.callback(
-#     Output('scan_progress', 'value'),
-#     Output('scan_progress', 'label'),
-#     Output('scan_etc', 'children'),
-#     Input('slow-interval', 'n_intervals'),
-#     State('stop_scan', 'disabled'),
-#     prevent_initial_call=True)
-# def update_scan_progress(n_intervals, stop_scan_disabled):
-#     """Updates the scan progress bar and status"""
-#     if stop_scan_disabled:
-#         raise PreventUpdate
-#     else:
-#         progress = control_loop.scan_progress
-#         total_time = control_loop.total_time
-#         scan_state = control_loop.scan
-#         if scan_state == 1:
-#             progress_value, progress_text, etc_text = calculate_scan_progress(progress, total_time)
-#             return progress_value, progress_text, etc_text
-#         else:
-#             # If scan is complete, end the tweaking thread and reset the progress bar
-#             #control_loop.stop_tweaking()
-#             state.scan_status = ":green[_Scan Finished_]"
-#             status_text = "_*Scan is Finished !*_"
-#             scan_text_style = {'color': colors['success'], 'font-weight': 'bold', 'font-size': '18px',}
-#             etc_text = "*_Estimated Time of Completion: 0 sec left_*"
-#             # state.scan = 0
-#             raise_toast('Status Update', 'Scan is Finished!', 'success')
-#             set_props('update_time_per_step', {'disabled': True})
-#             set_props('start_scan', {'disabled': False})
-#             set_props('stop_scan', {'disabled': True})
-#             set_props('scan_status', {'children': status_text,'style': scan_text_style})
-#             return 100, "Scan Completed", etc_text
+@app.callback(
+    Output('scan_progress', 'value'),
+    Output('scan_progress', 'label'),
+    Output('scan_etc', 'children'),
+    Input('slow-interval', 'n_intervals'),
+    State('stop_scan', 'disabled'),
+    prevent_initial_call=True)
+def update_scan_progress(n_intervals, stop_scan_disabled):
+    """Updates the scan progress bar and status"""
+    if stop_scan_disabled:
+        raise PreventUpdate
+    else:
+        progress = control_loop.scan_progress
+        total_time = control_loop.total_time
+        scan_state = control_loop.scan
+        if scan_state == 1:
+            progress_value, progress_text, etc_text = calculate_scan_progress(progress, total_time)
+            return progress_value, progress_text, etc_text
+        else:
+            # If scan is complete, end the tweaking thread and reset the progress bar
+            #control_loop.stop_tweaking()
+            state.scan_status = ":green[_Scan Finished_]"
+            status_text = "_*Scan is Finished !*_"
+            scan_text_style = {'color': colors['success'], 'font-weight': 'bold', 'font-size': '18px',}
+            etc_text = "*_Estimated Time of Completion: 0 sec left_*"
+            # state.scan = 0
+            raise_toast('Status Update', 'Scan is Finished!', 'success')
+            set_props('update_time_per_step', {'disabled': True})
+            set_props('start_scan', {'disabled': False})
+            set_props('stop_scan', {'disabled': True})
+            set_props('scan_status', {'children': status_text,'style': scan_text_style})
+            return 100, "Scan Completed", etc_text
         
-# @app.callback(
+@app.callback(
+    Input('slow-interval', 'n_intervals'),
+    prevent_initial_call=True
+)
+def lock_sanity_check(n_intervals):
+    try:
+        get_etalon_lock_status()
+        get_cavity_lock_status()
+    except Exception as e:
+        error(e, 'Error in lock status', 'warning')
+
+@app.callback(
+    Output('wnum_display', 'children'),
+    Input('fast-interval', 'n_intervals'))
+def update_current_wnum(n_intervals):
+    """Updates the current wavenumber continuously in the while loop"""
+    try:
+        control_loop.update()
+        c_wnum = get_cwnum()
+        c_wnum = str(c_wnum)
+    except Exception as e:
+        error(e, 'Error in getting current wavenumber', 'warning')
+
+    return c_wnum
+
+@app.callback(
+    Output('wavenumber_vs_time', 'figure'),
+    Input('fast-interval', 'n_intervals'))
+def update_plot(n_intervals):
+    """Updates the current wavenumber and plot continuously in the while loop
     
-#     Input('slow-interval', 'n_intervals'))
-# def lock_sanity_check(n_intervals):
-#     if get_etalon_lock_status():
-#         return 
-
-# @app.callback(
-#     Output('wnum_display', 'children'),
-#     Input('fast-interval', 'n_intervals'))
-# def update_current_wnum(n_intervals):
-#     """Updates the current wavenumber continuously in the while loop"""
-#     try:
-#         control_loop.update()
-#         c_wnum = get_cwnum()
-#         c_wnum = str(c_wnum)
-#     except Exception as e:
-#         error(e, 'Error in getting current wavenumber', 'warning')
-
-#     return c_wnum
-
-# @app.callback(
-#     Output('wavenumber_vs_time', 'figure'),
-#     Input('fast-interval', 'n_intervals'))
-# def update_plot(n_intervals):
-#     """Updates the current wavenumber and plot continuously in the while loop
-    
-#     Args:
-#         plot(placeholder): Placeholder for the plot
-#         dataf_space(placeholder: Placeholder for the current wavenumber)
-#     """
-#     try:
-#         xtoPlot, ytoPlot = control_loop.get_df_to_plot()
-#         if len(xtoPlot) != len(ytoPlot):
-#             error(e, 'The length of time series is different from that of wavenumber', 'warning')
-#             return no_update, no_update
-#     except Exception as e:
-#         error(e, 'Error in getting plot data', 'warning')
-#     # Time series plot
-#     if xtoPlot and ytoPlot:
-#         if len(xtoPlot) < 2:
-#             fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(255,77,1, 1)')), layout=go.Layout(
-#                 xaxis=dict(title="Time(s)"), yaxis=dict(title="Wavenumber (cm^-1)", exponentformat="none"), uirevision=True, paper_bgcolor=colors['main_bg'], plot_bgcolor=colors['sidebar_bg'],  
-#                 ))
-#             fig.update_xaxes(showgrid=True, gridwidth=1, griddash='dash', minor_griddash="dot", gridcolor='Blue')
-#             return fig
-#         else:
-#             patched_fig = Patch()
-#             patched_fig["data"][0]["x"] = xtoPlot
-#             patched_fig["data"][0]["y"] = ytoPlot
-#             return patched_fig
-#         # if state.freq_lock_clicked or state.scan_button:
-#         #     y_ref = control_loop.target
-#         #     y_lower = y_ref - 0.00002
-#         #     y_upper = y_ref + 0.00002
-#         #     fig.add_hrect(y0=y_lower, y1=y_upper, line_width=0, fillcolor="LightPink", opacity=0.5)
-#     # dataf_space.metric(label="Current Wavenumber", value=state.c_wnum)
-#     else: return no_update
+    Args:
+        plot(placeholder): Placeholder for the plot
+        dataf_space(placeholder: Placeholder for the current wavenumber)
+    """
+    try:
+        xtoPlot, ytoPlot = control_loop.get_df_to_plot()
+        if len(xtoPlot) != len(ytoPlot):
+            error(e, 'The length of time series is different from that of wavenumber', 'warning')
+            return no_update, no_update
+    except Exception as e:
+        error(e, 'Error in getting plot data', 'warning')
+    # Time series plot
+    if xtoPlot and ytoPlot:
+        if len(xtoPlot) < 2:
+            fig = go.Figure(data=go.Scatter(x=xtoPlot, y=ytoPlot, mode='lines+markers', marker=dict(size = 8, color='rgba(255,77,1, 1)')), layout=go.Layout(
+                xaxis=dict(title="Time(s)"), yaxis=dict(title="Wavenumber (cm^-1)", exponentformat="none"), uirevision=True, paper_bgcolor=colors['main_bg'], plot_bgcolor=colors['sidebar_bg'],  
+                ))
+            fig.update_xaxes(showgrid=True, gridwidth=1, griddash='dash', minor_griddash="dot", gridcolor='Blue')
+            return fig
+        else:
+            patched_fig = Patch()
+            patched_fig["data"][0]["x"] = xtoPlot
+            patched_fig["data"][0]["y"] = ytoPlot
+            return patched_fig
+        # if state.freq_lock_clicked or state.scan_button:
+        #     y_ref = control_loop.target
+        #     y_lower = y_ref - 0.00002
+        #     y_upper = y_ref + 0.00002
+        #     fig.add_hrect(y0=y_lower, y1=y_upper, line_width=0, fillcolor="LightPink", opacity=0.5)
+    # dataf_space.metric(label="Current Wavenumber", value=state.c_wnum)
+    else: return no_update
 
 def main():
     try:
@@ -801,4 +827,4 @@ def main():
         print(1)
 
 if __name__ == "__main__":
-    app.run(debug=True, host='0.0.0.0', port=2355)
+    app.run(debug=True, port=2355)
